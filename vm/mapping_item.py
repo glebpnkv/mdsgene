@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import Optional, Callable, Dict, List # Added Callable, Dict
+from dataclasses import dataclass
+from typing import Optional, Callable, Dict # Added Callable, Dict
 
 @dataclass
 class MappingItem:

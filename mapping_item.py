@@ -1,5 +1,6 @@
 import dataclasses
 
+
 @dataclasses.dataclass
 class MappingItem:
     """Data class to hold mapping information."""
@@ -7,6 +8,7 @@ class MappingItem:
     question: str
     mapped_excel_column: str
     response_convertion_strategy: str
+
 
 # The Question class from RagQueryEngine.java is also simple,
 # let's define it here or within rag_query_engine.py

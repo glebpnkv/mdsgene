@@ -1,17 +1,16 @@
 import sys
 from datetime import timedelta
-from typing import Optional
 
 from langchain_community.llms import Ollama
 from langchain_community.embeddings import OllamaEmbeddings
-from langchain_core.outputs import LLMResult, Generation, Embedding
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 # Configure your Ollama connection details
 OLLAMA_BASE_URL = "http://localhost:11434"
 CHAT_MODEL_NAME = "llama3" # Example chat model from Java code
 EMBEDDING_MODEL_NAME = "nomic-embed-text" # Example embedding model
 TIMEOUT = timedelta(seconds=300)
+
 
 class OllamaClient:
     """Wraps Ollama models (conceptual translation)."""
@@ -42,7 +41,7 @@ class OllamaClient:
             print(f"Error initializing Ollama clients: {e}", file=sys.stderr)
             raise # Re-raise exception to indicate failure
 
-    def get_embedding(self, text: str) -> Optional[Embedding]:
+    def get_embedding(self, text: str) -> list[float] | None:
         """Generates an embedding for a given text."""
         try:
             print(f"\nGenerating embedding for: \"{text[:100]}...\"")
@@ -56,7 +55,7 @@ class OllamaClient:
             traceback.print_exc()
             return None
 
-    def chat(self, message: str) -> Optional[AIMessage]:
+    def chat(self, message: str) -> AIMessage | None:
         """Sends a simple chat message to the LLM."""
         try:
             print(f"\nSending chat message: \"{message[:100]}...\"")
@@ -71,6 +70,7 @@ class OllamaClient:
             import traceback
             traceback.print_exc()
             return None
+
 
 # --- Example Usage ---
 if __name__ == "__main__":

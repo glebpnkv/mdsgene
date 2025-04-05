@@ -1,6 +1,6 @@
 import sys
 from datetime import timedelta
-from typing import Optional
+from pathlib import Path
 
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import FAISS # Using FAISS as in-memory store
@@ -20,6 +20,7 @@ TIMEOUT_EMBEDDING = timedelta(seconds=60)
 # Define splitter parameters
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 100
+
 
 class DocumentProcessor:
     """Handles splitting, embedding, and storing document text."""
@@ -48,7 +49,7 @@ class DocumentProcessor:
             # Initialize an In-Memory Vector Store (using FAISS)
             # FAISS needs to be created from documents, so we initialize it as None
             # and create it during process_document.
-            self.vector_store: Optional[FAISS] = None
+            self.vector_store: FAISS | None = None
             print("FAISS Vector Store placeholder ready.")
 
         except Exception as e:
@@ -103,11 +104,11 @@ class DocumentProcessor:
             import traceback
             traceback.print_exc()
 
-    def get_vector_store(self) -> Optional[FAISS]:
+    def get_vector_store(self) -> FAISS | None:
         """Returns the initialized vector store."""
         return self.vector_store
 
-# --- Example Usage ---
+# Example Usage
 if __name__ == "__main__":
     # --- Step 1: Get Text (using previous class) ---
     file_path = r"D:\000333\fine_tune_deepseek_r1\test_pdf\ando2012-22991136.pdf" # Change path

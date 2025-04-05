@@ -12,6 +12,14 @@ dependencies = [
     "fastapi>=0.115.12",
     "langchain-community>=0.3.20",
     "langchain-ollama>=0.3.0",
+    "openpyxl>=3.1.5",
+    "pandas>=2.2.3",
     "paper-qa>=5.11.1",
+    "pypdf>=5.4.0",
     "uvicorn>=0.34.0",
+]
+
+[dependency-groups]
+dev = [
+    "jupyterlab>=4.3.6",
 ]

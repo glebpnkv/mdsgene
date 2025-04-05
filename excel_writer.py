@@ -1,10 +1,9 @@
 import sys
-import os
 import pandas as pd
-from typing import List, Dict, Optional
 from pathlib import Path
 
 from mapping_item import MappingItem # Assuming MappingItem is defined here or imported
+
 
 class ExcelWriter:
     """Writes or appends data to an Excel file using pandas."""
@@ -12,8 +11,8 @@ class ExcelWriter:
     @staticmethod
     def write_or_append_excel(
         filepath: str | Path,
-        mapping_items: List[MappingItem],
-        results_map: Dict[str, str]
+        mapping_items: list[MappingItem],
+        results_map: dict[str, str]
     ):
         """
         Writes or appends a row of results to an Excel sheet.
@@ -91,11 +90,15 @@ class ExcelWriter:
         except ImportError:
              print("Error: 'openpyxl' library not found. Please install it: pip install openpyxl", file=sys.stderr)
         except PermissionError:
-             print(f"Error: Permission denied to write file '{filepath}'. Is it open in another program?", file=sys.stderr)
+             print(
+                 f"Error: Permission denied to write file '{filepath}'. Is it open in another program?",
+                 file=sys.stderr
+             )
         except Exception as e:
             print(f"Error writing Excel file: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc()
+
 
 # --- Example Usage ---
 if __name__ == "__main__":
@@ -104,7 +107,8 @@ if __name__ == "__main__":
     # Example Mapping Items (ensure 'field' matches keys in results)
     example_headers = [
         MappingItem(field='pmid', question='q1', mapped_excel_column='A', response_convertion_strategy='s1'),
-        MappingItem(field='Identified_Patient_ID', question='q_id', mapped_excel_column='B', response_convertion_strategy='s_id'),
+        MappingItem(field='Identified_Patient_ID', question='q_id',
+                    mapped_excel_column='B', response_convertion_strategy='s_id'),
         MappingItem(field='aao', question='q2', mapped_excel_column='C', response_convertion_strategy='s2'),
         MappingItem(field='sex', question='q3', mapped_excel_column='D', response_convertion_strategy='s3'),
     ]

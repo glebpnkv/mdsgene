@@ -1,23 +1,23 @@
-import sys
 import json
+import os
 import re
+import sys
 from datetime import timedelta
-from typing import List, Optional, Dict, Any
-import requests
+from typing import List, Optional
 from urllib.parse import quote_plus
 
-from langchain_ollama import OllamaLLM # Note: Class name is OllamaLLM now
-from langchain_ollama import OllamaEmbeddings
-from langchain_community.vectorstores import FAISS
+import requests
+from langchain.schema import BaseRetriever
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
-from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_core.output_parsers import StrOutputParser
-from langchain.schema import BaseRetriever  # For type hinting
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from langchain_ollama import OllamaEmbeddings, OllamaLLM
 
+from mapping_item import MappingItem, QuestionInfo
 from pdf_text_extractor import PdfTextExtractor
-from mapping_item import MappingItem, QuestionInfo  # Import helper classes
 
 # Ollama Configuration
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -34,8 +34,8 @@ CHUNK_OVERLAP = 100
 MAX_RETRIEVER_RESULTS = 3
 
 # External Service
-import os
 PAPERQA_SERVER_URL = os.getenv("PAPERQA_SERVER_URL", "http://34.147.75.119:8000/ai_prompt")
+
 
 class RagQueryEngine:
     """Handles RAG-based querying of an ingested PDF document."""
@@ -54,7 +54,8 @@ class RagQueryEngine:
             self.embedding_model = OllamaEmbeddings(
                 base_url=OLLAMA_BASE_URL,
                 model=EMBEDDING_MODEL_NAME,
-                # request_timeout=TIMEOUT_EMBEDDING.total_seconds(), # Timeout might be handled differently or not available directly
+                # request_timeout=TIMEOUT_EMBEDDING.total_seconds(), # Timeout might be handled differently or
+                # not available directly
             )
             # Change Ollama to OllamaLLM
             self.chat_model = OllamaLLM(
@@ -66,7 +67,7 @@ class RagQueryEngine:
             print("Ollama models initialized.")
 
             # --- Ingest document ---
-            self.vector_store: Optional[FAISS] = self._ingest_document(pdf_filepath)
+            self.vector_store: FAISS | None = self._ingest_document(pdf_filepath)
             if self.vector_store is None:
                 raise ValueError("Document ingestion failed, cannot proceed.")
 
@@ -126,16 +127,16 @@ class RagQueryEngine:
         """Sets up the LangChain Expression Language (LCEL) chain for RAG."""
         # Define the prompt template
         template = """
-Use the following pieces of context to answer the question at the end.
-If you don't know the answer from the context, just say that you don't know, don't try to make up an answer.
-Use three sentences maximum and keep the answer concise.
-
-Context:
-{context}
-
-Question: {question}
-
-Helpful Answer:"""
+            Use the following pieces of context to answer the question at the end.
+            If you don't know the answer from the context, just say that you don't know, don't try to make up an answer.
+            Use three sentences maximum and keep the answer concise.
+            
+            Context:
+            {context}
+            
+            Question: {question}
+            
+            Helpful Answer:"""
         rag_prompt_template = PromptTemplate.from_template(template)
 
         # Define how to format retrieved documents
@@ -144,13 +145,13 @@ Helpful Answer:"""
 
         # Define the RAG chain
         self.rag_chain = (
-                RunnableParallel(
-                    # Retrieve context based on question, format it, pass question through
-                    {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
-                )
-                | rag_prompt_template  # Apply prompt template
-                | self.chat_model  # Query the LLM
-                | StrOutputParser()  # Parse the LLM output string
+            RunnableParallel(
+                # Retrieve context based on question, format it, pass question through
+                {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
+            )
+            | rag_prompt_template  # Apply prompt template
+            | self.chat_model  # Query the LLM
+            | StrOutputParser()  # Parse the LLM output string
         )
 
     def _retrieve_from_paperqa(self, paperqa_query: str) -> str:
@@ -178,9 +179,14 @@ Helpful Answer:"""
 
         # 1. Query to extract potential identifiers (using external service or internal RAG)
         # Using the external service approach from the Java code
-        patient_extraction_query = """
-"Please extract a structured list of family-patient pairs from the document. Each line of the output should contain one set of family and corresponding patient identifier (for example, 'Family A: AII-11'). For each family, list all patient identifiers as provided in the text. If a unique numerical identifier is not provided, assign one sequentially within that family (starting with '1i' for the oldest affected patient). This formatted list will be used for subsequent detailed queries on each individual patient."
-        """
+        patient_extraction_query = """ 
+            "Please extract a structured list of family-patient pairs from the document. 
+            Each line of the output should contain one set of family and corresponding patient identifier 
+            (for example, 'Family A: AII-11'). For each family, list all patient identifiers as 
+            provided in the text. If a unique numerical identifier is not provided, assign one sequentially 
+            within that family (starting with '1i' for the oldest affected patient). 
+            This formatted list will be used for subsequent detailed queries on each individual patient."
+            """  # noqa: F841
         try:
             # Use the external PaperQA service as in the Java code
             # raw_identifier_info = self._retrieve_from_paperqa(patient_extraction_query)
@@ -188,15 +194,16 @@ Helpful Answer:"""
             # --- Alternative: Use internal RAG for extraction (might be less reliable) ---
             # This queries *your own* ingested document using the RAG chain
             # The prompt needs to be tailored for extraction based on context.
-            extraction_prompt = f"""
-Based ONLY on the provided context, extract a list of family and patient identifiers mentioned.
-Present the result as a simple list, one identifier or family-patient pair per line (e.g., "Family A: Patient II-1", "Patient 3", "Family B: Proband").
-Do not add any explanation or introductory text.
-
-Context:
-{{context}}
-
-List of Identifiers:
+            extraction_prompt = """
+                Based ONLY on the provided context, extract a list of family and patient identifiers mentioned.
+                Present the result as a simple list, one identifier or family-patient pair per line 
+                (e.g., "Family A: Patient II-1", "Patient 3", "Family B: Proband"). Do not add any explanation or 
+                introductory text.
+                
+                Context:
+                {context}
+                
+                List of Identifiers:
             """
             extraction_rag_prompt = PromptTemplate.from_template(extraction_prompt)
             extraction_chain = (
@@ -220,19 +227,21 @@ List of Identifiers:
 
             # 2. Use LLM to convert the raw list into JSON
             json_conversion_prompt = f"""
-Please convert the provided family-patient information into a JSON array.
-Each JSON object should include the following fields:
-- "family": the family name (e.g., "A", "B"), or null if the patient is unaffiliated or family is not mentioned.
-- "patient": the patient identifier (e.g., "AII-11", "Patient 3", "1i").
-
-Follow this structure exactly. If the input is empty or contains no identifiers, return an empty JSON array `[]`.
-
-Input Information:
-\"\"\"
-{raw_identifier_info}
-\"\"\"
-
-JSON Array Output:
+                Please convert the provided family-patient information into a JSON array.
+                Each JSON object should include the following fields:
+                - "family": the family name (e.g., "A", "B"), or null if the patient is unaffiliated or family is 
+                not mentioned.
+                - "patient": the patient identifier (e.g., "AII-11", "Patient 3", "1i").
+                
+                Follow this structure exactly. If the input is empty or contains no identifiers, return an 
+                empty JSON array `[]`.
+                
+                Input Information:
+                \"\"\"
+                {raw_identifier_info}
+                \"\"\"
+                
+                JSON Array Output:
             """
             print("Requesting LLM to format identifiers as JSON...")
             # Use the chat model directly for this formatting task

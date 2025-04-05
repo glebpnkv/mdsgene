@@ -10,26 +10,23 @@ This FastAPI server provides APIs for:
 - Patient information extraction
 - Field mapping and processing with LLM assistance
 """
-
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status, Response
-from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional, Dict, Any, Callable, Set
-
-from paperqa import DocDetails
-from pydantic import BaseModel
-from pathlib import Path
-from datetime import datetime
-import uvicorn
-import logging
-import os
-import tempfile  # Keep for potential fallback
-import shutil
-import httpx
 import asyncio
 import json
+import logging
+import os
 import re
-import traceback
-import atexit  # For ensuring save on unexpected exit? Less reliable than shutdown event.
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+
+import httpx
+import uvicorn
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status, Response
+from fastapi.middleware.cors import CORSMiddleware
+from paperqa import DocDetails
+from pydantic import BaseModel
+
 
 # Configure logging
 logging.basicConfig(
@@ -40,6 +37,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 original_inject_clean_doi_url_into_data = DocDetails.inject_clean_doi_url_into_data
+
 
 def patched_inject_clean_doi_url_into_data(data: dict) -> dict:
     doi_url = data.get("doi_url")
@@ -403,21 +401,26 @@ def init_paperqa():
     else:
         current_persistent_data_dir = Path(os.getenv("PERSISTENT_DATA_DIR", "./persistent_data"))
         paperqa_storage_root = current_persistent_data_dir / "pqa_data"
-        logger.warning(f"PQA_HOME environment variable not set. Falling back to default path within persistent data: {paperqa_storage_root.resolve()}")
+        logger.warning(
+            f"PQA_HOME environment variable not set. "
+            f"Falling back to default path within persistent data: {paperqa_storage_root.resolve()}"
+        )
         os.environ["PQA_HOME"] = str(paperqa_storage_root)
 
     try:
         paperqa_storage_root.mkdir(parents=True, exist_ok=True)
         logger.info(f"Ensured PaperQA storage directory exists: {paperqa_storage_root}")
     except OSError as e:
-        logger.error(f"Failed to create PaperQA storage directory '{paperqa_storage_root}': {e}. PaperQA initialization likely to fail.")
+        logger.error(
+            f"Failed to create PaperQA storage directory '{paperqa_storage_root}': {e}. "
+            f"PaperQA initialization likely to fail."
+        )
         paperqa_available = False
         return False
 
     # --- Initialize PaperQA Components ---
     try:
         from paperqa import Settings, Docs
-        from paperqa.settings import AgentSettings
         import litellm
 
         ollama_service_base = OLLAMA_SERVICE_BASE_URL
@@ -457,7 +460,6 @@ def init_paperqa():
             summary_llm_config={"model": f"ollama/{PAPERQA_MODEL_NAME}", "api_base": ollama_service_base},
             embedding=f"ollama/{EMBEDDING_MODEL}",
             embedding_config={"model": f"ollama/{EMBEDDING_MODEL}", "api_base": ollama_service_base},
-            # agent=AgentSettings(...)
         )
         logger.info("PaperQA Settings configured and stored globally.")
 
@@ -528,7 +530,10 @@ def load_documents_storage():
             logger.info(
                 f"Successfully loaded {len(documents_storage)} document entries from {current_backup_storage_file}.")
         except Exception as e:
-            logger.error(f"Failed to load documents storage from {current_backup_storage_file}: {e}", exc_info=True)
+            logger.error(
+                f"Failed to load documents storage from {current_backup_storage_file}: {e}",
+                exc_info=True
+            )
             documents_storage = []
     else:
         logger.info(
@@ -631,7 +636,8 @@ async def extract_text_from_file(file_path: str) -> str:
                                 text += page_text + "\n"
                         except Exception as page_err_pypdf2:
                             logger.warning(
-                                f"PyPDF2 failed to extract text from page {i + 1} of '{file_path_obj.name}': {page_err_pypdf2}")
+                                f"PyPDF2 failed to extract text from page {i + 1} "
+                                f"of '{file_path_obj.name}': {page_err_pypdf2}")
 
                     logger.info(
                         f"PyPDF2 extraction complete for '{file_path_obj.name}'. Total text length: {len(text)}")
@@ -643,19 +649,19 @@ async def extract_text_from_file(file_path: str) -> str:
                 except Exception as pypdf2_err:
                     logger.error(f"Error during PyPDF2 PDF processing for '{file_path_obj.name}': {pypdf2_err}",
                                  exc_info=True)
-                    return f"[Error: PyPDF2 library failed during processing]"
+                    return "[Error: PyPDF2 library failed during processing]"
 
             except Exception as pdf_lib_err:
                 logger.error(f"Error during pypdf PDF processing for '{file_path_obj.name}': {pdf_lib_err}",
                              exc_info=True)
-                return f"[Error: pypdf library failed during processing]"
+                return "[Error: pypdf library failed during processing]"
         else:
             logger.warning(f"Unsupported file format '{ext}' for file: {file_path}")
             return f"[Error: Unsupported file format '{ext}']"
 
     except Exception as e:
         logger.error(f"Unexpected error during text extraction for {file_path}: {e}", exc_info=True)
-        return f"[Error: Unexpected text extraction failure]"
+        return "[Error: Unexpected text extraction failure]"
 
 
 # --- PaperQA Document Functions ---
@@ -742,7 +748,10 @@ async def add_document_to_paperqa(doc_to_add: SimpleDocument) -> Optional[str]:
                 logger.error("PQA Docs object has no recognized 'add' or 'aadd' method.")
                 return None
         except Exception as add_err:
-            logger.error(f"Error occurred during PaperQA add/aadd execution for '{docname}': {add_err}", exc_info=True)
+            logger.error(
+                f"Error occurred during PaperQA add/aadd execution for '{docname}': {add_err}",
+                exc_info=True
+            )
             logger.debug(f"PQA keys after failed add attempt: {list(docs_instance.docs.keys())}")
             return None
 
@@ -755,7 +764,9 @@ async def add_document_to_paperqa(doc_to_add: SimpleDocument) -> Optional[str]:
                 return expected_dockey
             else:
                 logger.error(
-                    f"Document '{docname}' add process completed BUT key '{expected_dockey}' was NOT found in PaperQA index afterwards. Possible internal PQA error or persistence issue.")
+                    f"Document '{docname}' add process completed BUT key '{expected_dockey}' was NOT found "
+                    f"in PaperQA index afterwards. Possible internal PQA error or persistence issue."
+                )
 
                 # Try to find key by docname
                 found_key = None
@@ -766,14 +777,18 @@ async def add_document_to_paperqa(doc_to_add: SimpleDocument) -> Optional[str]:
 
                 if found_key:
                     logger.warning(
-                        f"Found key '{found_key}' by looking up docname '{docname}'. Using this key, but it differs from expected md5sum '{expected_dockey}'.")
+                        f"Found key '{found_key}' by looking up docname '{docname}'. "
+                        f"Using this key, but it differs from expected md5sum '{expected_dockey}'."
+                    )
                     doc_to_add.paperqa_dockey = found_key
                     return found_key
                 else:
                     logger.error(f"Could not verify addition of '{docname}' by key or docname.")
                     return None
         else:
-            logger.error(f"Add process for '{docname}' did not complete successfully (no exception, but flag not set).")
+            logger.error(
+                f"Add process for '{docname}' did not complete successfully (no exception, but flag not set)."
+            )
             return None
 
     except ImportError as e:
@@ -821,7 +836,9 @@ async def query_paperqa(query: str, target_doc_name: Optional[str] = None) -> st
             logger.info(f"PQA References: {references}")
             if target_doc_name and target_doc_name not in references:
                 logger.warning(
-                    f"PQA references ('{references}') might not include target ('{target_doc_name}') for query '{query[:50]}...'.")
+                    f"PQA references ('{references}') might not include target "
+                    f"('{target_doc_name}') for query '{query[:50]}...'."
+                )
         else:
             logger.info("PQA provided no references for this query.")
 
@@ -837,7 +854,10 @@ async def ollama_query(prompt: str, context: Optional[str] = None, model: str = 
     # Prepare the prompt with optional context
     full_prompt = prompt
     if context:
-        full_prompt = f"Context:\n\"\"\"\n{context}\n\"\"\"\n\nBased ONLY on the context provided above, answer:\n\nQuestion: {prompt}\n\nAnswer:"
+        full_prompt = (
+            f"Context:\n\"\"\"\n{context}\n\"\"\"\n\nBased ONLY on the context provided above, "
+            f"answer:\n\nQuestion: {prompt}\n\nAnswer:"
+        )
 
     logger.info(f"Sending direct query to Ollama '{model}'. Prompt len: {len(full_prompt)}")
     logger.debug(f"Ollama Query Full Prompt:\n---\n{full_prompt}\n---")
@@ -863,7 +883,9 @@ async def ollama_query(prompt: str, context: Optional[str] = None, model: str = 
             eval_duration_s = f"{(data.get('eval_duration', 0) / 1e9):.2f}s" if data.get('eval_duration') else "N/A"
 
             logger.info(
-                f"Ollama direct response received from '{model}'. Length: {len(result_text)}. Time: {response_time_s} (Eval: {eval_count} tokens, {eval_duration_s})")
+                f"Ollama direct response received from '{model}'. Length: {len(result_text)}. "
+                f"Time: {response_time_s} (Eval: {eval_count} tokens, {eval_duration_s})"
+            )
             logger.debug(f"Ollama Raw Response Text:\n---\n{result_text}\n---")
 
             return result_text
@@ -876,13 +898,16 @@ async def ollama_query(prompt: str, context: Optional[str] = None, model: str = 
             except Exception:
                 error_body = "(Could not read error response body)"
 
-            error_msg = f"Ollama API Error: Status {e.response.status_code} calling {e.request.url}. Response: {error_body[:500]}"
+            error_msg = (f"Ollama API Error: Status {e.response.status_code} calling {e.request.url}. "
+                         f"Response: {error_body[:500]}")
             logger.error(error_msg)
-            return f"Error: Ollama request failed - Status {e.response.status_code}. Check model name ('{model}') and Ollama server."
+            return (f"Error: Ollama request failed - Status {e.response.status_code}. "
+                    f"Check model name ('{model}') and Ollama server.")
 
         except httpx.TimeoutException as e:
             # Handle timeout errors
-            error_msg = f"Ollama API Error: Request timed out after {OLLAMA_TIMEOUT}s for model '{model}' at {e.request.url}."
+            error_msg = (f"Ollama API Error: Request timed out after {OLLAMA_TIMEOUT}s "
+                         f"for model '{model}' at {e.request.url}.")
             logger.error(error_msg)
             return f"Error: Ollama request timed out ({OLLAMA_TIMEOUT}s)"
 
@@ -890,14 +915,16 @@ async def ollama_query(prompt: str, context: Optional[str] = None, model: str = 
             # Handle network/connection errors
             error_msg = f"Ollama Network Error: Could not connect to Ollama service at {e.request.url}. Error: {e}"
             logger.error(error_msg)
-            return f"Error: Could not connect to Ollama service. Ensure it's running and URL is correct ({OLLAMA_API_BASE_URL})."
+            return (f"Error: Could not connect to Ollama service. "
+                    f"Ensure it's running and URL is correct ({OLLAMA_API_BASE_URL}).")
 
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             # Handle JSON parsing errors
             logger.error(
-                f"Ollama API Error: Failed to decode JSON response from Ollama. Status: {response.status_code}. Response text: {response.text[:500]}",
+                f"Ollama API Error: Failed to decode JSON response from Ollama. "
+                f"Status: {response.status_code}. Response text: {response.text[:500]}",
                 exc_info=True)
-            return f"Error: Ollama returned an invalid response (not JSON)."
+            return "Error: Ollama returned an invalid response (not JSON)."
 
         except Exception as e:
             # Handle any other unexpected errors
@@ -940,21 +967,24 @@ def create_mapping_data() -> List[MappingItem]:
         field="pmid",
         question="What is the PubMed ID of the article?",
         mapped_excel_column="PMID",
-        response_convertion_strategy="Extract the PubMed ID (PMID) as a numeric identifier (e.g., 28847615). If not found or mentioned, return -99."
+        response_convertion_strategy="Extract the PubMed ID (PMID) as a numeric identifier "
+                                     "(e.g., 28847615). If not found or mentioned, return -99."
     ))
 
     mapping_data.append(MappingItem(
         field="author, year",
         question="Who is the first author and what is the publication year?",
         mapped_excel_column="Author_year",
-        response_convertion_strategy="Extract the last name of the first author and the four-digit publication year, formatted as 'LastName, Matisse' (e.g., 'Smith, 2018'). If not found, return -99."
+        response_convertion_strategy="Extract the last name of the first author and the four-digit publication year, "
+                                     "formatted as 'LastName, Matisse' (e.g., 'Smith, 2018'). If not found, return -99."
     ))
 
     mapping_data.append(MappingItem(
         field="comments_study",
         question="Are there any general comments about the study design, limitations, or overall findings mentioned?",
         mapped_excel_column="Study Comments",
-        response_convertion_strategy="Summarize any general comments about the study itself in free text (max 200 characters). If no relevant comments are found, return -99."
+        response_convertion_strategy="Summarize any general comments about the study itself in free text "
+                                     "(max 200 characters). If no relevant comments are found, return -99."
     ))
 
     # Patient fields
@@ -962,42 +992,55 @@ def create_mapping_data() -> List[MappingItem]:
         field="family_id",
         question="What is the family ID or identifier reported for this patient?",
         mapped_excel_column="Family ID",
-        response_convertion_strategy="Extract the family identifier exactly as reported (e.g., 'Family 1', 'F002', 'Pedigree 3'). If it's explicitly stated as a sporadic case or no family ID is mentioned, return -99."
+        response_convertion_strategy="Extract the family identifier exactly as reported "
+                                     "(e.g., 'Family 1', 'F002', 'Pedigree 3'). If it's explicitly stated as a "
+                                     "sporadic case or no family ID is mentioned, return -99."
     ))
 
     mapping_data.append(MappingItem(
         field="individual_id",
-        question="What is the individual ID or identifier reported for this patient within their family or study (e.g., 'II-1', 'Patient 3', 'Proband', 'Subject A')?",
+        question="What is the individual ID or identifier reported for this patient within their family "
+                 "or study (e.g., 'II-1', 'Patient 3', 'Proband', 'Subject A')?",
         mapped_excel_column="Individual ID",
-        response_convertion_strategy="Extract the individual's identifier as reported. If not provided or only 'proband' is used without a specific ID, return -99."
+        response_convertion_strategy="Extract the individual's identifier as reported. If not provided or "
+                                     "only 'proband' is used without a specific ID, return -99."
     ))
 
     mapping_data.append(MappingItem(
         field="sex",
         question="What is the reported sex of the individual (Male/Female)?",
         mapped_excel_column="Sex",
-        response_convertion_strategy="Return 'M' for male or 'F' for female based on the text. If not explicitly reported, return -99."
+        response_convertion_strategy="Return 'M' for male or 'F' for female based on the text. "
+                                     "If not explicitly reported, return -99."
     ))
 
     mapping_data.append(MappingItem(
         field="aao",
         question="What was the age at onset (AAO) of symptoms reported, specified in years?",
         mapped_excel_column="AAO",
-        response_convertion_strategy="Extract the age at onset in years as a number (integer). If reported as a range, take the lower bound. If reported in months/days, convert to years (approximate if necessary). If not reported or unknown, return -99."
+        response_convertion_strategy="Extract the age at onset in years as a number (integer). "
+                                     "If reported as a range, take the lower bound. If reported in months/days, "
+                                     "convert to years (approximate if necessary). "
+                                     "If not reported or unknown, return -99."
     ))
 
     mapping_data.append(MappingItem(
         field="age",
         question="What is the current age or age at last examination/report/death reported, specified in years?",
         mapped_excel_column="Age",
-        response_convertion_strategy="Extract the age at last clinical evaluation, age at report, or age at death in years as a number (integer). If a range, use the value corresponding to the last examination. If not reported, return -99."
+        response_convertion_strategy="Extract the age at last clinical evaluation, age at report, "
+                                     "or age at death in years as a number (integer). If a range, use the value "
+                                     "corresponding to the last examination. If not reported, return -99."
     ))
 
     mapping_data.append(MappingItem(
         field="consanguinity",
         question="Does the text mention if the parents of the patient were consanguineous (related)?",
         mapped_excel_column="Consanguinity",
-        response_convertion_strategy="Return 'yes' if consanguinity (e.g., 'related parents', 'consanguineous marriage') is mentioned for the patient's parents. Return 'no' if explicitly stated as non-consanguineous. If not mentioned either way, return -99."
+        response_convertion_strategy="Return 'yes' if consanguinity (e.g., 'related parents', "
+                                     "'consanguineous marriage') is mentioned for the patient's parents. "
+                                     "Return 'no' if explicitly stated as non-consanguineous. "
+                                     "If not mentioned either way, return -99."
     ))
 
     # Genetic information
@@ -1005,34 +1048,51 @@ def create_mapping_data() -> List[MappingItem]:
         field="gene1",
         question="What is the primary gene symbol associated with the condition or mutation found in this patient?",
         mapped_excel_column="Gene1",
-        response_convertion_strategy="Extract the official HGNC gene symbol (e.g., 'PARK2', 'SNCA', 'LRRK2'). Ensure correct capitalization. If multiple genes are mentioned, identify the primary one related to the patient's diagnosis or reported mutation. If not found, return -99."
+        response_convertion_strategy="Extract the official HGNC gene symbol (e.g., 'PARK2', 'SNCA', 'LRRK2'). "
+                                     "Ensure correct capitalization. If multiple genes are mentioned, identify the "
+                                     "primary one related to the patient's diagnosis or reported mutation. "
+                                     "If not found, return -99."
     ))
 
     mapping_data.append(MappingItem(
         field="mut1_c",
-        question="What is the specific mutation identified in gene1 at the DNA level, using HGVS cDNA notation (e.g., c.511C>T, c.123_125del)?",
+        question="What is the specific mutation identified in gene1 at the DNA level, using HGVS cDNA "
+                 "notation (e.g., c.511C>T, c.123_125del)?",
         mapped_excel_column="Mut1 cDNA",
-        response_convertion_strategy="Extract the primary mutation using HGVS coding DNA (cDNA) nomenclature (e.g., c.511C>T, c.123delG, c.88+1G>A). Include the 'c.' prefix. If only protein level is given, try to infer if possible, otherwise return -99. If not found, return -99."
+        response_convertion_strategy="Extract the primary mutation using HGVS coding DNA (cDNA) nomenclature "
+                                     "(e.g., c.511C>T, c.123delG, c.88+1G>A). Include the 'c.' prefix. "
+                                     "If only protein level is given, try to infer if possible, otherwise return -99. "
+                                     "If not found, return -99."
     ))
 
     mapping_data.append(MappingItem(
         field="mut1_p",
-        question="What is the effect of the primary mutation (mut1_c) at the protein level, using HGVS protein notation (e.g., p.Gln171*, p.Arg412His)?",
+        question="What is the effect of the primary mutation (mut1_c) at the protein level, using HGVS protein notation "
+                 "(e.g., p.Gln171*, p.Arg412His)?",
         mapped_excel_column="Mut1 Protein",
-        response_convertion_strategy="Extract the protein change using HGVS protein nomenclature (e.g., p.Gln171*, p.Arg412His, p.Val7fs). Include the 'p.' prefix. If only cDNA level is given, try to infer if possible, otherwise return -99. If not found, return -99."
+        response_convertion_strategy="Extract the protein change using HGVS protein nomenclature "
+                                     "(e.g., p.Gln171*, p.Arg412His, p.Val7fs). Include the 'p.' prefix. "
+                                     "If only cDNA level is given, try to infer if possible, otherwise return -99. "
+                                     "If not found, return -99."
     ))
 
     mapping_data.append(MappingItem(
         field="mut1_zygosity",
-        question="What is the zygosity reported for the primary mutation (mut1_c/mut1_p) in this patient (heterozygous, homozygous, hemizygous, compound heterozygous)?",
+        question="What is the zygosity reported for the primary mutation (mut1_c/mut1_p) in this patient "
+                 "(heterozygous, homozygous, hemizygous, compound heterozygous)?",
         mapped_excel_column="Mut1 Zygosity",
-        response_convertion_strategy="Return 'heterozygous', 'homozygous', 'hemizygous', or 'compound heterozygous' based on the text description for the primary mutation. If not explicitly reported, return -99."
+        response_convertion_strategy="Return 'heterozygous', 'homozygous', 'hemizygous', or 'compound heterozygous' "
+                                     "based on the text description for the primary mutation. "
+                                     "If not explicitly reported, return -99."
     ))
 
     # Custom processors
     mapping_data.append(MappingItem(
         field="symptoms_list",
-        question="List the key clinical symptoms or phenotypes reported for the patient. For each symptom mentioned, indicate if it was present (Yes) or explicitly absent (No). Format each as 'Symptom Name: Yes/No'. Examples: 'Tremor: Yes', 'Rigidity: No', 'Cognitive Impairment: Yes'. If no specific symptoms are listed or assessed this way, state 'None'.",
+        question="List the key clinical symptoms or phenotypes reported for the patient. For each symptom mentioned, "
+                 "indicate if it was present (Yes) or explicitly absent (No). Format each as 'Symptom Name: Yes/No'. "
+                 "Examples: 'Tremor: Yes', 'Rigidity: No', 'Cognitive Impairment: Yes'. "
+                 "If no specific symptoms are listed or assessed this way, state 'None'.",
         mapped_excel_column="Dynamic_Symptoms",
         response_convertion_strategy="Parse the list provided by the LLM...",
         custom_processor=_symptom_list_processor
@@ -1040,7 +1100,9 @@ def create_mapping_data() -> List[MappingItem]:
 
     mapping_data.append(MappingItem(
         field="hpo_symptoms",
-        question="List any Human Phenotype Ontology (HPO) terms and their status (present/absent) reported for the patient. Format as 'HPO Term Name (HP:XXXXXXX): Yes/No'. Example: 'Seizures (HP:0001250): Yes', 'Ataxia (HP:0001251): No'. If no HPO terms are listed, state 'None'.",
+        question="List any Human Phenotype Ontology (HPO) terms and their status (present/absent) reported for the "
+                 "patient. Format as 'HPO Term Name (HP:XXXXXXX): Yes/No'. Example: 'Seizures (HP:0001250): Yes', "
+                 "'Ataxia (HP:0001251): No'. If no HPO terms are listed, state 'None'.",
         mapped_excel_column="Dynamic_HPO",
         response_convertion_strategy="Parse the list provided by the LLM...",
         custom_processor=_hpo_symptom_processor
@@ -1088,7 +1150,9 @@ async def format_answer(raw_answer: Optional[str], strategy: str) -> str:
             logger.debug("Format pre-check: Raw contains 'unknown' phrase but has other content. Proceeding.")
 
     # Build prompt for the formatter LLM
-    prompt = f"""Please analyze the following raw text and format it precisely according to the strategy provided. Output ONLY the final formatted value requested by the strategy, with no extra explanations, apologies, or introductory phrases like "The formatted value is:".
+    prompt = f"""Please analyze the following raw text and format it precisely according to the strategy provided. 
+    Output ONLY the final formatted value requested by the strategy, with no extra explanations, apologies, 
+    or introductory phrases like "The formatted value is:".
 
 Raw Text:
 \"\"\"
@@ -1421,14 +1485,19 @@ async def process_document_mapping_synchronous_with_cancel(doc_id: int):
         list_of_patient_question_sets = []
         patient_identifiers_found = []
 
-        if raw_ids_answer.startswith("Error:") or not raw_ids_answer or raw_ids_answer.strip().lower() in ['none',
-                                                                                                           'no patients found']:
+        if (
+            raw_ids_answer.startswith("Error:")
+            or not raw_ids_answer
+            or raw_ids_answer.strip().lower()
+            in ['none', 'no patients found']
+        ):
             logger.warning(f"No patients extracted. PQA Resp: '{raw_ids_answer[:100]}...'")
         else:
             logger.info(f"Raw IDs: '{raw_ids_answer[:200]}...'")
 
             # Convert raw extraction to structured JSON
-            json_prompt = f"Convert to JSON array [{{'family': ID_or_null, 'patient': ID}}]:\n\"\"\"\n{raw_ids_answer}\n\"\"\"\n\nJSON Array Output ONLY:"
+            json_prompt = (f"Convert to JSON array [{{'family': ID_or_null, 'patient': ID}}]:"
+                           f"\n\"\"\"\n{raw_ids_answer}\n\"\"\"\n\nJSON Array Output ONLY:")
             json_resp = await ollama_query(prompt=json_prompt, model=FORMATTER_MODEL_NAME)
 
             # Check if cancelled
@@ -1445,10 +1514,9 @@ async def process_document_mapping_synchronous_with_cancel(doc_id: int):
 
             if json_text:
                 try:
-                    list_of_patient_question_sets = await _generate_questions_from_patient_list(json_text,
-                                                                                                all_mapping_items)
-                    temp_patients = json.loads(json_text)
-                    seen_p = set()
+                    list_of_patient_question_sets = await _generate_questions_from_patient_list(
+                        json_text, all_mapping_items
+                    )
                 except (ValueError, RuntimeError, json.JSONDecodeError) as e:
                     logger.error(f"Patient gen failed: {e}. JSON: '{json_text[:200]}...'")
                     list_of_patient_question_sets = []
@@ -1497,7 +1565,8 @@ async def process_document_mapping_synchronous_with_cancel(doc_id: int):
 
                 patient_id = p_q_set[0].patient_id if p_q_set else "Unk"
                 family_id = p_q_set[0].family_id if p_q_set else None
-                log_p_ctx = f"Patient {p_num}/{len(list_of_patient_question_sets)} (ID: {patient_id}, Fam: {family_id or 'N/A'})"
+                log_p_ctx = (f"Patient {p_num}/{len(list_of_patient_question_sets)} "
+                             f"(ID: {patient_id}, Fam: {family_id or 'N/A'})")
                 logger.info(f"--- Processing {log_p_ctx} ---")
 
                 # Start with common data
@@ -1537,7 +1606,8 @@ async def process_document_mapping_synchronous_with_cancel(doc_id: int):
                         dynamic_results: Dict[str, str] = await item.custom_processor(raw_dynamic_answer, item)
                         logger.debug(f"  Processor '{field_name}' returned {len(dynamic_results)} cols.")
                     except Exception as cp_err:
-                        logger.error(f"Custom processor error '{field_name}' on {log_p_ctx}: {cp_err}", exc_info=True)
+                        logger.error(f"Custom processor error '{field_name}' on {log_p_ctx}: "
+                                     f"{cp_err}", exc_info=True)
                         error_col_name = f"{field_name}_proc_error"
                         patient_row_data[error_col_name] = str(cp_err)
 
@@ -1820,7 +1890,8 @@ async def reset_all_documents():
                         logger.error(f"Reset: Failed delete PQA index dir {index_dir}: {e}")
                         errors.append("Failed delete PQA index dir")
 
-        final_message = f"Reset complete. Files deleted: {deleted_files_count}. PQA entries processed: {deleted_pqa_count}."
+        final_message = (f"Reset complete. Files deleted: {deleted_files_count}. "
+                         f"PQA entries processed: {deleted_pqa_count}.")
 
         if errors:
             final_message += f" Errors: {len(errors)}. Check logs."
@@ -1953,7 +2024,8 @@ async def get_document_patients(doc_id: int):
 
     try:
         # Query PaperQA for patient identifiers
-        extract_prompt = f"From '{doc_name}' only, list distinct patient identifiers. Format: 'FamilyID: PatientID' or just 'PatientID'. If none, output 'None'."
+        extract_prompt = (f"From '{doc_name}' only, list distinct patient identifiers. "
+                          f"Format: 'FamilyID: PatientID' or just 'PatientID'. If none, output 'None'.")
         logger.info(f"Querying PQA for patient IDs in '{doc_name}'...")
         raw_ids_answer = await query_paperqa(extract_prompt, target_doc_name=doc_name)
         raw_ids = str(raw_ids_answer)

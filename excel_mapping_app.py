@@ -1,18 +1,13 @@
-import sys
-import os
-from datetime import timedelta
-from typing import List, Dict, Optional
-from pathlib import Path
 import re
+import sys
+from datetime import timedelta
+from pathlib import Path
 
 from langchain_ollama import OllamaLLM
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.outputs import LLMResult
 
-# Import local modules
-from mapping_item import MappingItem, QuestionInfo
-from rag_query_engine import RagQueryEngine  # Requires previous setup
 from excel_writer import ExcelWriter
+from mapping_item import MappingItem
+from rag_query_engine import RagQueryEngine  # Requires previous setup
 
 # --- Configuration ---
 # Use Path objects for better path handling
@@ -49,48 +44,22 @@ class ExcelMappingApp:
             self.formatter_llm = None  # Indicate failure
 
     # --- Populated createMappingData method (Python equivalent) ---
-    def create_mapping_data(self) -> List[MappingItem]:
+    def create_mapping_data(self) -> list[MappingItem]:
         """Creates the list of fields, questions, and formatting strategies."""
-        mapping_data: List[MappingItem] = []
         # Add items using the MappingItem dataclass
-        # Copy all the commented and uncommented lines from the Java version
-
-        # Example uncommented item:
-        mapping_data.append(MappingItem(
-            field="aao",
-            question="What was the age at onset of symptoms? (Enter -99 if unknown)",
-            mapped_excel_column="Guessed: AAO",
-            response_convertion_strategy="Enter the age at onset (AAO) of symptoms, in years, as reported in the publication. If the age at onset is not given, enter -99."
-        ))
-
-        # Add all other MappingItem instances from your Java code here...
-        # Make sure the 'field' names are consistent (e.g., used in COMMON_FIELDS, results dict keys)
-
-        # Example commented item translated:
-        # mapping_data.append(MappingItem(
-        #     field="pmid",
-        #     question="What is the PubMed ID of the article?",
-        #     mapped_excel_column="Guessed: PMID",
-        #     response_convertion_strategy="Enter the PubMed ID (PMID) of the publication as a numeric identifier (e.g., 28847615)."
-        # ))
-        # mapping_data.append(MappingItem(
-        #     field="author, year",
-        #     question="Who is the first author and what is the publication year?",
-        #     mapped_excel_column="Guessed: Author_year",
-        #     response_convertion_strategy="Enter the last name of the first author, followed by a comma and the four-digit publication year (e.g., 'Smith, 2018')."
-        # ))
-        # mapping_data.append(MappingItem(
-        #     field="comments_study",
-        #     question="Any general comments about the study?",
-        #     mapped_excel_column="Guessed: Study Comments",
-        #     response_convertion_strategy="Enter any overarching comments regarding the study. For example, if the authors were contacted for missing information, record the date of contact and any relevant response in this field."
-        # ))
-        # ... add all others ...
-
+        mapping_data: list[MappingItem] = [
+            MappingItem(
+                field="aao",
+                question="What was the age at onset of symptoms? (Enter -99 if unknown)",
+                mapped_excel_column="Guessed: AAO",
+                response_convertion_strategy="Enter the age at onset (AAO) of symptoms, in years, as reported "
+                                             "in the publication. If the age at onset is not given, enter -99."
+            )
+        ]
         return mapping_data
 
     # --- Implemented formatAnswer method ---
-    def format_answer(self, raw_answer: Optional[str], strategy: str) -> str:
+    def format_answer(self, raw_answer: str | None, strategy: str) -> str:
         """Formats the raw RAG answer using an LLM based on the provided strategy."""
         if self.formatter_llm is None:
             print(" -> ERROR: Formatter LLM not available. Returning raw answer.", file=sys.stderr)
@@ -108,30 +77,33 @@ class ExcelMappingApp:
         try:
             # Build formatting prompt (similar to Java)
             formatting_prompt = f"""
-Format the following raw answer according to these instructions.
-Provide ONLY the final formatted value, with no explanation or preamble.
-
-Raw answer from previous query:
-\"\"\"
-{raw_answer}
-\"\"\"
-
-Formatting strategy / Expected output description:
-\"\"\"
-{strategy}
-\"\"\"
-
-Rules for formatting:
-1. For numeric answers (age, counts): Extract just the number. If unknown/not given/not found, return -99. If explicitly zero/none, return 0.
-2. For yes/no questions: Return lowercase "yes" or "no". If unknown/not mentioned, return -99.
-3. For sex: Return uppercase "M" or "F". If unknown, return -99.
-4. For zygosity: Return "heterozygous", "homozygous", or "hemizygous". If unknown/not applicable, return -99.
-5. For inclusion decisions (IN/EX): Return uppercase "IN" or "EX". If unclear, return -99.
-6. For optional fields or when info is absent: If not applicable/none/blank/not found, return -99.
-7. Remove any preamble like "The answer is:", "Based on the context:", etc. Just give the value.
-8. If the raw answer clearly indicates the information is missing or unknown (e.g., "not stated", "unknown", "not reported", "N/A", "could not find"), return -99.
-
-Formatted answer:"""  # No trailing """ here
+                Format the following raw answer according to these instructions.
+                Provide ONLY the final formatted value, with no explanation or preamble.
+                
+                Raw answer from previous query:
+                \"\"\"
+                {raw_answer}
+                \"\"\"
+                
+                Formatting strategy / Expected output description:
+                \"\"\"
+                {strategy}
+                \"\"\"
+                
+                Rules for formatting:
+                1. For numeric answers (age, counts): Extract just the number. 
+                If unknown/not given/not found, return -99. If explicitly zero/none, return 0.
+                2. For yes/no questions: Return lowercase "yes" or "no". If unknown/not mentioned, return -99.
+                3. For sex: Return uppercase "M" or "F". If unknown, return -99.
+                4. For zygosity: Return "heterozygous", "homozygous", or "hemizygous". 
+                If unknown/not applicable, return -99.
+                5. For inclusion decisions (IN/EX): Return uppercase "IN" or "EX". If unclear, return -99.
+                6. For optional fields or when info is absent: If not applicable/none/blank/not found, return -99.
+                7. Remove any preamble like "The answer is:", "Based on the context:", etc. Just give the value.
+                8. If the raw answer clearly indicates the information is missing or unknown 
+                (e.g., "not stated", "unknown", "not reported", "N/A", "could not find"), return -99.
+                
+                Formatted answer:"""  # No trailing """ here
 
             # Query the formatter model
             response = self.formatter_llm.invoke(formatting_prompt)
@@ -145,20 +117,32 @@ Formatted answer:"""  # No trailing """ here
                 formatted_answer = formatted_answer[1:-1]
 
             # Sometimes models still add explanations, try to remove common ones
-            formatted_answer = re.sub(r'^(Formatted Answer|Answer|The formatted answer is):\s*', '', formatted_answer,
-                                      flags=re.IGNORECASE)
+            formatted_answer = re.sub(
+                r'^(Formatted Answer|Answer|The formatted answer is):\s*',
+                '',
+                formatted_answer,
+                flags=re.IGNORECASE
+            )
 
             # Fallback for empty responses after stripping
             if not formatted_answer:
                 print(
-                    f" -> WARNING: LLM returned empty response for formatting: '{raw_answer[:50]}...'. Using cleaned raw answer or -99.")
+                    f" -> WARNING: LLM returned empty response for formatting: '{raw_answer[:50]}...'. "
+                    f"Using cleaned raw answer or -99.")
                 # Decide on a better fallback: -99 or cleaned raw answer? Let's use -99 for consistency.
                 return "-99"
                 # return raw_answer.strip()
 
             # Final sanity check for common "unknown" phrases missed by LLM
-            if formatted_answer.lower() in ["unknown", "not stated", "not reported", "n/a", "none", "not applicable",
-                                            "not mentioned"]:
+            if formatted_answer.lower() in [
+                "unknown",
+                "not stated",
+                "not reported",
+                "n/a",
+                "none",
+                "not applicable",
+                "not mentioned"
+            ]:
                 print(f" -> LLM returned '{formatted_answer}', interpreting as unknown. Returning -99.")
                 return "-99"
 
@@ -204,7 +188,7 @@ Formatted answer:"""  # No trailing """ here
 
         # --- Get Patient Identifiers ---
         try:
-            # This now returns List[List[QuestionInfo]]
+            # This now returns list[list[QuestionInfo]]
             list_of_patient_question_sets = query_engine.get_patient_identifiers(all_mapping_items)
         except Exception as e:
             print(f"Error getting patient identifiers: {e}", file=sys.stderr)
@@ -214,7 +198,7 @@ Formatted answer:"""  # No trailing """ here
         # Header order is determined by all_mapping_items order
         # We also need a column for the identified patient ID itself.
         # Let's insert it after potential common fields.
-        headers_for_excel: List[MappingItem] = []
+        headers_for_excel: list[MappingItem] = []
         added_patient_id_header = False
 
         # Add common headers first (if any)
@@ -255,12 +239,15 @@ Formatted answer:"""  # No trailing """ here
                 current_patient_id = patient_question_set[0].patient_id
                 current_family_id = patient_question_set[0].family_id
                 print(
-                    f"\n=== Processing Patient Set {patient_num} (ID: '{current_patient_id}', Family: '{current_family_id}') ===")
+                    f"\n=== Processing Patient Set {patient_num} "
+                    f"(ID: '{current_patient_id}', Family: '{current_family_id}') ==="
+                )
 
                 # Dictionary to store results for this patient row
-                patient_results: Dict[str, str] = {}
+                patient_results: dict[str, str] = {
+                    "Identified_Patient_ID": current_patient_id or "-99"
+                }
                 # Add the identified patient ID to the results
-                patient_results["Identified_Patient_ID"] = current_patient_id or "-99"  # Use -99 if somehow None
 
                 # Add common results (if they were fetched - currently COMMON_FIELDS is empty)
                 # for common_field in COMMON_FIELDS:

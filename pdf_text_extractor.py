@@ -1,7 +1,7 @@
 import sys
-import os
-from pypdf import PdfReader
 from pathlib import Path
+
+from pypdf import PdfReader
 
 
 class PdfTextExtractor:

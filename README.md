@@ -8,11 +8,21 @@ This guide explains how to set up and run a Dockerized application on a Google C
 Before proceeding, ensure that:
 
 - You have a Google Cloud account.
+- You have Google Cloud CLI installed
 - You have set up a VM instance with Docker installed.
 - The VM instance has GPU support enabled (if needed).
 - Required ports (`11434`, `8000`) are open in the VM's firewall settings.
 
 ## 🐳 Step-by-Step Instructions
+
+### 0. **Install Google Cloud CLI**
+
+From [Using the Google Cloud CLI installer](https://cloud.google.com/sdk/docs/downloads-interactive)
+
+```bash
+curl https://sdk.cloud.google.com | bash
+exec -l $SHELL
+```
 
 ### 1. **Connect to Your VM**
 
