@@ -23,7 +23,17 @@ project_root/
 
 ## Setup Instructions
 
-### 1. Prepare Your Static Files
+### 1. Configure Docker to use Nvidia driver
+
+```bash
+# Installing nvidia-container-toolkit
+sudo apt-get install -y nvidia-container-toolkit
+
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+### 2. Prepare Your Static Files
 
 Place all your static web files (HTML, CSS, JavaScript, images, etc.) in the `static_site` directory. The entire directory structure will be copied to the container.
 
@@ -32,7 +42,7 @@ mkdir -p static_site
 # Copy your static files here
 ```
 
-### 2. Build the Docker Image
+### 3. Build the Docker Image
 
 From your project root directory, build the Docker image:
 
@@ -48,12 +58,13 @@ This process may take some time as it:
 - Downloads the required LLM models (mistral, deepseek-r1:14b, nomic-embed-text)
 - Installs Python dependencies
 
-### 3. Run the Container
+### 4. Run the Container
 
 Run the container with GPU support and expose all necessary ports:
 
 ```bash
 docker run -d --gpus all \
+  -e OLLAMA_HOST=0.0.0.0 \
   -p 11434:11434 \
   -p 8000:8000 \
   -p 8080:8080 \
@@ -61,12 +72,15 @@ docker run -d --gpus all \
   my-app
 ```
 
+Environment variables:
+- `OLLAMA_HOST=0.0.0.0` - Allows forwarding Ollama requests 
+
 Port mappings:
 - `11434:11434` - Ollama API
 - `8000:8000` - PaperQA FastAPI server
 - `8080:8080` - Static web server
 
-### 4. Verify Services
+### 5. Verify Services
 
 Check if all services are running:
 
