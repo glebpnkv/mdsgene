@@ -1,0 +1,5 @@
+google-generativeai
+pandas~=2.2.3
+openpyxl
+requests~=2.32.3
+protobuf~=5.29.4
