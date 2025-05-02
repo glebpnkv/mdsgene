@@ -1,0 +1,7 @@
+{
+    "_default_processor_Information not found.": "{\"aao\": \"-99\"}",
+    "_default_processor_Based on the information in the provided document:\n\nThe Age at Onset (AAO) for the carrier of the p.I560T variation is stated as 68 years old in the Discussion section (page 2, right column). Table 1 identifies patient 'd2542' as having the p.I560T variation.\n\nTherefore, the AAO for patient 'd2542' was **68 years old**.": "{\"aao\": \"68\"}",
+    "_default_processor_Information not found.\n\nThe document mentions patient 'd12436' in Table 1, identifying a genetic variation (p.M607V). The text in section 3 (Results) states that carriers (presumably including d12436) presented with classic Parkinson's disease (PD) and refers to \"Supplementary Table 2\" for clinical characteristics, but this supplementary table is not included in the provided document. Therefore, the age at onset for this patient cannot be determined from the given text.": "{\"aao\": \"-99\"}",
+    "_default_processor_Information not found": "{\"aao\": \"-99\"}",
+    "_default_processor_Based on the information in the document:\n\nThe variation p.I560T was identified in patient 'd2542' (Table 1). In the Discussion section (page 2), referring to this variation and its carrier, it states: \"...the variation was also observed in 1 elderly unaffected sibling (AAI, 89 years old) of the carrier (AAO, 68 years old).\"\n\nTherefore, the age at onset (AAO) of symptoms for patient 'd2542' was 68 years old.": "{\"aao\": \"68\"}"
+}
