@@ -3,7 +3,6 @@ import sys
 import pandas as pd
 from pathlib import Path
 from typing import List, Dict
-from openpyxl import load_workbook
 
 
 class ExcelWriter:
@@ -27,8 +26,6 @@ class ExcelWriter:
         try:
             # Check if the file exists
             if filepath.exists():
-                # Load the existing workbook
-                book = load_workbook(filepath)
 
                 # Read the existing data from the file
                 existing_data = pd.read_excel(filepath)

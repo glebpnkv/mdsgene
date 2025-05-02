@@ -1,6 +1,5 @@
 # cache_manager.py
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Dict, Optional, Union

@@ -14,7 +14,6 @@ from google.genai.types import Part
 from google import genai
 
 # Import necessary structures
-from mapping_item import QuestionInfo, MappingItem
 
 # --- Configuration ---
 # It's best practice to load API keys from environment variables
@@ -242,7 +241,7 @@ class GeminiProcessor:
         Uses Gemini to format a raw answer according to a specific strategy.
         (Logic remains the same)
         """
-        print(f"  Formatting answer using Gemini...")
+        print("  Formatting answer using Gemini...")
         # Pre-checks remain the same
         if not raw_answer or raw_answer.strip().lower() in ["", "none", "n/a", "information not found", "not specified", "not reported", "unknown"]:
             print(f"  Raw answer indicates missing info ('{raw_answer}'). Returning -99.")

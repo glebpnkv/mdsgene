@@ -197,7 +197,7 @@ You can also set this inline when running the script:
 
 ```bash
 PAPERQA_SERVER_URL=http://your-paperqa-server:8000/ai_prompt 
-python excel_mapping_app.py
+python src/excel_mapping_app.py
 ```
 
 This variable points to an external service used for identifying patient IDs from documents. The URL must be reachable from your local environment.

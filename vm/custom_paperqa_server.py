@@ -13,7 +13,7 @@ This FastAPI server provides APIs for:
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status, Response
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional, Dict, Any, Callable, Set
+from typing import List, Optional, Dict, Any
 
 from paperqa import DocDetails
 from pydantic import BaseModel
@@ -22,14 +22,11 @@ from datetime import datetime
 import uvicorn
 import logging
 import os
-import tempfile  # Keep for potential fallback
 import shutil
 import httpx
 import asyncio
 import json
 import re
-import traceback
-import atexit  # For ensuring save on unexpected exit? Less reliable than shutdown event.
 
 # Configure logging
 logging.basicConfig(
@@ -417,7 +414,6 @@ def init_paperqa():
     # --- Initialize PaperQA Components ---
     try:
         from paperqa import Settings, Docs
-        from paperqa.settings import AgentSettings
         import litellm
 
         ollama_service_base = OLLAMA_SERVICE_BASE_URL
@@ -678,19 +674,19 @@ async def extract_text_from_file(file_path: str) -> str:
                 except Exception as pypdf2_err:
                     logger.error(f"Error during PyPDF2 PDF processing for '{file_path_obj.name}': {pypdf2_err}",
                                  exc_info=True)
-                    return f"[Error: PyPDF2 library failed during processing]"
+                    return "[Error: PyPDF2 library failed during processing]"
 
             except Exception as pdf_lib_err:
                 logger.error(f"Error during pypdf PDF processing for '{file_path_obj.name}': {pdf_lib_err}",
                              exc_info=True)
-                return f"[Error: pypdf library failed during processing]"
+                return "[Error: pypdf library failed during processing]"
         else:
             logger.warning(f"Unsupported file format '{ext}' for file: {file_path}")
             return f"[Error: Unsupported file format '{ext}']"
 
     except Exception as e:
         logger.error(f"Unexpected error during text extraction for {file_path}: {e}", exc_info=True)
-        return f"[Error: Unexpected text extraction failure]"
+        return "[Error: Unexpected text extraction failure]"
 
 
 # --- PaperQA Document Functions ---
@@ -927,12 +923,12 @@ async def ollama_query(prompt: str, context: Optional[str] = None, model: str = 
             logger.error(error_msg)
             return f"Error: Could not connect to Ollama service. Ensure it's running and URL is correct ({OLLAMA_API_BASE_URL})."
 
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             # Handle JSON parsing errors
             logger.error(
                 f"Ollama API Error: Failed to decode JSON response from Ollama. Status: {response.status_code}. Response text: {response.text[:500]}",
                 exc_info=True)
-            return f"Error: Ollama returned an invalid response (not JSON)."
+            return "Error: Ollama returned an invalid response (not JSON)."
 
         except Exception as e:
             # Handle any other unexpected errors
@@ -1480,10 +1476,10 @@ async def process_document_mapping_synchronous_with_cancel(doc_id: int):
 
             if json_text:
                 try:
-                    list_of_patient_question_sets = await _generate_questions_from_patient_list(json_text,
-                                                                                                all_mapping_items)
-                    temp_patients = json.loads(json_text)
-                    seen_p = set()
+                    list_of_patient_question_sets = await _generate_questions_from_patient_list(
+                        json_array_text=json_text,
+                        mapping_items=all_mapping_items
+                    )
                 except (ValueError, RuntimeError, json.JSONDecodeError) as e:
                     logger.error(f"Patient gen failed: {e}. JSON: '{json_text[:200]}...'")
                     list_of_patient_question_sets = []

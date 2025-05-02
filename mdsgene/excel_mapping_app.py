@@ -1,52 +1,19 @@
 # excel_mapping_app.py
-import hashlib
+import json
 import sys
 import os
-import traceback  # For detailed error printing
-from pathlib import Path
+import traceback
 import re
-import json  # <--- ДОБАВЛЕНО для кэширования patient_identifiers
-from typing import List, Dict, Optional, Set, Tuple, Callable  # Added Callable
+from pathlib import Path
 
-# --- Local Imports ---
-# Use the new Gemini Processor
-# Ensure gemini_processor.py is in the same directory or Python path
-try:
-    from gemini_processor import GeminiProcessor
-except ImportError:
-    print("ERROR: Could not import 'gemini_processor'. Ensure 'gemini_processor.py' exists.", file=sys.stderr)
-    sys.exit(1)
-# MappingItem structures
-# Ensure mapping_item.py is in the same directory or Python path
-try:
-    from mapping_item import MappingItem, QuestionInfo
-except ImportError:
-    print("ERROR: Could not import 'mapping_item'. Ensure 'mapping_item.py' exists.", file=sys.stderr)
-    sys.exit(1)
-# Excel writing utility (assuming excel_writer.py exists and has write_all_data)
-try:
-    from excel_writer import ExcelWriter
-except ImportError:
-    print(
-        "ERROR: excel_writer.py not found. Please ensure it exists and contains the 'ExcelWriter' class with a 'write_all_data' static method.",
-        file=sys.stderr)
-    sys.exit(1)
+from typing import Dict, Optional, Set, Callable
 
-# PMID extractor for PubMed
-try:
-    from pmid_extractor import PmidExtractor
-except ImportError:
-    print("ERROR: Could not import 'pmid_extractor'. Ensure 'pmid_extractor.py' exists in the same directory.",
-          file=sys.stderr)
-    sys.exit(1)
+from cache_manager import CacheManager
+from excel_writer import ExcelWriter
+from gemini_processor import GeminiProcessor
+from mapping_item import MappingItem, QuestionInfo
+from pmid_extractor import PmidExtractor
 
-# Cache Manager (assuming the version accepting cache_filepath in init)
-try:
-    from cache_manager import CacheManager
-except ImportError:
-    print("ERROR: Could not import 'CacheManager'. Ensure 'cache_manager.py' exists in the same directory.",
-          file=sys.stderr)
-    sys.exit(1)
 
 # --- Configuration ---
 # PDF File Path (Update as needed)
@@ -63,9 +30,9 @@ GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")  # Or "gemini-
 COMMON_FIELDS = ["pmid", "author, year", "comments_study"]
 
 # --- NEW CONFIGURATION ---
-CACHE_DIR = Path(os.getenv("GEMINI_CACHE_DIR", "./.gemini_cache"))  # Directory for cache files
+CACHE_DIR = Path(os.getenv("GEMINI_CACHE_DIR", ".gemini_cache"))  # Directory for cache files
 
-# create cache directory if it doesn't exist
+# Create the cache directory if it doesn't exist
 if not CACHE_DIR.exists():
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -149,7 +116,11 @@ class ExcelMappingApp:
             })
 
     # --- Custom Field Processor Implementations ---
-    def _default_processor(self, raw_answer: Optional[str], item: MappingItem) -> Dict[str, str]:
+    def _default_processor(
+        self,
+        item: MappingItem,
+        raw_answer: str | None = None,
+    ) -> dict[str, str]:
         """
         Default processor: Uses the Gemini formatter for the raw answer.
         Now expects raw_answer to be a dict: {"answer": ..., "evidence": ...}
@@ -185,19 +156,20 @@ class ExcelMappingApp:
                                                             "information not found"]:
             return results  # Return empty map if no symptoms reported
         symptoms = re.split(r'[;\n]', raw_answer)  # Split by semicolon or newline
-        found_structured = False
 
         for symptom_entry in symptoms:
             symptom_entry = symptom_entry.strip()
-            if not symptom_entry: continue
-            parts = symptom_entry.split(":", 1);  # Split only on the first colon
+            if not symptom_entry:
+                continue
+            parts = symptom_entry.split(":", 1)  # Split only on the first colon
             if len(parts) == 2:
-                symptom_name_raw = parts[0].strip();
-                if not symptom_name_raw or symptom_name_raw.lower() == "none": continue
-                symptom_name = symptom_name_raw.lower();
-                symptom_name = re.sub(r'[\s\(\)-]+', '_', symptom_name);
+                symptom_name_raw = parts[0].strip()
+                if not symptom_name_raw or symptom_name_raw.lower() == "none":
+                    continue
+                symptom_name = symptom_name_raw.lower()
+                symptom_name = re.sub(r'[\s\(\)-]+', '_', symptom_name)
                 symptom_name = re.sub(r'_+', '_', symptom_name)
-                symptom_name = re.sub(r'[^\w]+', '', symptom_name);
+                symptom_name = re.sub(r'[^\w]+', '', symptom_name)
                 symptom_name = symptom_name.strip('_')
                 if not symptom_name: 
                     self.log(f"  -> Motor Symptom WARNING: Name '{symptom_name_raw}' became empty after sanitizing.", level="WARNING")
@@ -212,14 +184,15 @@ class ExcelMappingApp:
                     self.log(f"  -> Motor Symptom WARNING: Unknown presence value '{presence}' for symptom '{symptom_name_raw}'. Setting column '{column_name}' to -99.", level="WARNING")
                     value = "-99"
                 results[column_name] = value
-                found_structured = True
-            elif len(parts) == 1 and len(symptoms) == 1 and parts[0].lower() in ["none", "n/a", "not applicable",
-                                                                                 "none reported"]:
-                found_structured = True
+            elif len(parts) == 1 and len(symptoms) == 1 and parts[0].lower() in ["none", "n/a", "not applicable", "none reported"]:
                 break  # No symptoms to add
         return results
 
-    def _non_motor_symptom_processor(self, raw_answer: Optional[str], item: MappingItem) -> Dict[str, str]:
+    def _non_motor_symptom_processor(
+        self,
+        raw_answer: Optional[str],
+        item: MappingItem
+    ) -> dict[str, str]:
         """
         Processor for parsing NON-MOTOR symptoms list like "symptom_name:yes/no;..."
         Generates columns like "nms_symptomname_sympt".
@@ -234,20 +207,21 @@ class ExcelMappingApp:
 
         self.log(f"  NMS Processor: Processing raw answer: '{raw_answer[:100]}...'")
         symptoms = re.split(r'[;\n]', raw_answer)
-        found_structured = False
 
         for symptom_entry in symptoms:
             symptom_entry = symptom_entry.strip()
-            if not symptom_entry: continue
+            if not symptom_entry:
+                continue
 
             parts = symptom_entry.split(":", 1)
             if len(parts) == 2:
                 symptom_name_raw = parts[0].strip()
-                if not symptom_name_raw or symptom_name_raw.lower() == "none": continue
+                if not symptom_name_raw or symptom_name_raw.lower() == "none":
+                    continue
                 symptom_name = symptom_name_raw.lower()
-                symptom_name = re.sub(r'[\s\(\)-]+', '_', symptom_name);
+                symptom_name = re.sub(r'[\s\(\)-]+', '_', symptom_name)
                 symptom_name = re.sub(r'_+', '_', symptom_name)
-                symptom_name = re.sub(r'[^\w]+', '', symptom_name);
+                symptom_name = re.sub(r'[^\w]+', '', symptom_name)
                 symptom_name = symptom_name.strip('_')
                 if not symptom_name: 
                     self.log(f"  -> NMS WARNING: Name '{symptom_name_raw}' became empty after sanitizing.", level="WARNING")
@@ -261,29 +235,28 @@ class ExcelMappingApp:
                 else:
                     self.log(f"  -> NMS WARNING: Unknown presence value '{presence}' for symptom '{symptom_name_raw}'. Setting column '{column_name}' to -99.", level="WARNING")
                     value = "-99"
-                results[column_name] = value;
-                found_structured = True
-            elif len(parts) == 1 and len(symptoms) == 1 and parts[0].lower() in ["none", "n/a", "not applicable",
-                                                                                 "none reported"]:
-                found_structured = True
+                results[column_name] = value
+            elif len(parts) == 1 and len(symptoms) == 1 and parts[0].lower() in ["none", "n/a", "not applicable", "none reported"]:
                 break
         return results
 
     def _symptom_list_processor(self, raw_answer: Optional[str], item: MappingItem) -> Dict[str, str]:
         results: Dict[str, str] = {}
-        if not raw_answer or raw_answer.strip().lower() in ["", "none", "not specified", "none reported",
-                                                            "information not found"]: return results
-        symptoms = re.split(r'[;\n]', raw_answer);
+        if not raw_answer or raw_answer.strip().lower() in ["", "none", "not specified", "none reported", "information not found"]:
+            return results
+        symptoms = re.split(r'[;\n]', raw_answer)
         found_structured = False
         for symptom_entry in symptoms:
             symptom_entry = symptom_entry.strip()
-            if not symptom_entry: continue
+            if not symptom_entry:
+                continue
             parts = symptom_entry.split(":", 1)
             if len(parts) == 2:
-                symptom_name_raw = parts[0].strip();
-                if not symptom_name_raw: continue
-                symptom_name = symptom_name_raw.lower();
-                symptom_name = re.sub(r'\s+', '_', symptom_name);
+                symptom_name_raw = parts[0].strip()
+                if not symptom_name_raw:
+                    continue
+                symptom_name = symptom_name_raw.lower()
+                symptom_name = re.sub(r'\s+', '_', symptom_name)
                 symptom_name = re.sub(r'[^a-z0-9_]+', '', symptom_name)
                 if not symptom_name: 
                     self.log(f"  -> Symptom WARNING: Name '{symptom_name_raw}' became empty after sanitizing.", level="WARNING")
@@ -297,51 +270,56 @@ class ExcelMappingApp:
                 else:
                     self.log(f"  -> Symptom WARNING: Unknown presence value '{presence}' for symptom '{symptom_name_raw}'. Setting column '{column_name}' to -99.", level="WARNING")
                     value = "-99"
-                results[column_name] = value;
+                results[column_name] = value
                 found_structured = True
             elif len(parts) == 1 and len(symptoms) == 1 and parts[0].lower() in ["none", "n/a", "not applicable",
                                                                                  "none reported"]:
-                found_structured = True; break
+                found_structured = True
+                break
             else:
                 self.log(f"  -> Symptom WARNING: Could not parse entry like 'name:value': '{symptom_entry}'", level="WARNING")
         if not found_structured and raw_answer.strip(): 
-            self.log(f"  -> Symptom WARNING: Parsing yielded no structured results for: '{raw_answer[:50]}...'. Storing raw in '{item.field}'.", level="WARNING");
+            self.log(f"  -> Symptom WARNING: Parsing yielded no structured results for: '{raw_answer[:50]}...'. Storing raw in '{item.field}'.", level="WARNING")
         results[item.field] = "-99"
         return results
 
-    def _hpo_symptom_processor(self, raw_answer: Optional[str], item: MappingItem) -> Dict[str, str]:
+    def _hpo_symptom_processor(
+        self,
+        item: MappingItem,
+        raw_answer: str | None = None,
+    ) -> dict[str, str]:
         """
         Processor for parsing HPO coded symptoms like "headache_HP:0002315:yes;..."
         Generates columns like "HP_0002315". Parses the RAW answer directly.
         """
         results: Dict[str, str] = {}
-        if not raw_answer or raw_answer.strip().lower() in ["", "none", "not specified", "none reported",
-                                                            "information not found"]: return results
+        if not raw_answer or raw_answer.strip().lower() in ["", "none", "not specified", "none reported", "information not found"]:
+            return results
         hpo_pattern = re.compile(
             r"(HP[:_ ]?\s?\d{7})[\s:\-\(\)]+(yes|no|present|absent|positive|negative|true|false|1|0)", re.IGNORECASE)
-        found_structured = False;
+        found_structured = False
         matches = hpo_pattern.findall(raw_answer)
-        if not matches and raw_answer.strip().lower() in ["none", "n/a", "not applicable",
-                                                          "none reported"]: found_structured = True
+        if not matches and raw_answer.strip().lower() in ["none", "n/a", "not applicable", "none reported"]:
+            found_structured = True
         for match in matches:
-            hpo_id_raw = match[0];
-            presence = match[1].lower();
+            hpo_id_raw = match[0]
+            presence = match[1].lower()
             hpo_digits = re.sub(r'[^0-9]', '', hpo_id_raw)
             if len(hpo_digits) == 7:
                 hpo_id_normalized = "HP_" + hpo_digits
             else:
                 self.log(f"  -> HPO WARNING: Invalid HPO ID format found: '{hpo_id_raw}'. Skipping.", level="WARNING")
                 continue
-            column_name = hpo_id_normalized;
-            value = "yes" if presence in ["yes", "present", "positive", "true", "1", "y"] else "no";
-            results[column_name] = value;
+            column_name = hpo_id_normalized
+            value = "yes" if presence in ["yes", "present", "positive", "true", "1", "y"] else "no"
+            results[column_name] = value
             found_structured = True
         if not found_structured and raw_answer.strip(): 
-            self.log(f"  -> HPO WARNING: HPO parsing yielded no structured results for: '{raw_answer[:50]}...'. Storing raw in '{item.field}'.", level="WARNING");
+            self.log(f"  -> HPO WARNING: HPO parsing yielded no structured results for: '{raw_answer[:50]}...'. Storing raw in '{item.field}'.", level="WARNING")
         results[item.field] = "-99"
         return results
 
-    def create_mapping_data(self, mapping_json_path: Path = None) -> List['MappingItem']:
+    def create_mapping_data(self, mapping_json_path: Path = None) -> list['MappingItem']:
         """
         Загружает список MappingItem из JSON-файла.
         Каждый элемент JSON должен содержать:
@@ -367,7 +345,7 @@ class ExcelMappingApp:
             # Add more processors as needed
         }
 
-        mapping_data: List['MappingItem'] = []
+        mapping_data: list['MappingItem'] = []
         with open(mapping_json_path, "r", encoding="utf-8") as f:
             items = json.load(f)
             for entry in items:
@@ -527,13 +505,13 @@ class ExcelMappingApp:
 
         self.log(f"--> Proceeding with {len(patient_identifiers)} patient identifiers.")
 
-        list_of_patient_question_sets: List[List[QuestionInfo]] = []
+        list_of_patient_question_sets: list[list[QuestionInfo]] = []
         if patient_identifiers:
             self.log(f"\nGenerating questions for {len(patient_identifiers)} unique patients...")
             for entry in patient_identifiers:
                 patient_id = entry.get("patient")
                 family_id = entry.get("family")
-                one_patient_questions: List[QuestionInfo] = []
+                one_patient_questions: list[QuestionInfo] = []
                 for item in all_mapping_items:
                     context_prefix = f"Regarding patient '{patient_id}'"
                     if family_id:
@@ -556,7 +534,7 @@ class ExcelMappingApp:
         else:
             self.log("\nNo patient identifiers found or loaded. Proceeding without patient-specific questions.")
 
-        all_patient_data_rows: List[Dict[str, str]] = []
+        all_patient_data_rows: list[Dict[str, str]] = []
         collected_headers: Set[str] = {"pmid", "family_id", "individual_id"}
 
         if not list_of_patient_question_sets:
@@ -600,7 +578,7 @@ class ExcelMappingApp:
                             if hasattr(self.gemini_processor, 'answer_question'):
                                 raw_answer = self.gemini_processor.answer_question(query_text, with_evidence=True)
                             else:
-                                self.log(f"ERROR: GeminiProcessor does not have 'answer_question' method. Cannot answer.",
+                                self.log("ERROR: GeminiProcessor does not have 'answer_question' method. Cannot answer.",
                                       level="ERROR", error=True)
                                 raw_answer = {"answer": "-99_API_METHOD_MISSING", "evidence": ""}
 
@@ -640,7 +618,7 @@ class ExcelMappingApp:
                                     f"ERROR: Processor '{processor_id}' for field '{current_item.field}' returned non-JSON-serializable data: {json_err}",
                                     level="ERROR", error=True)
                                 processed_data_single = {
-                                    current_item.field: f"PROCESSING_ERROR: Non-serializable output"}
+                                    current_item.field: "PROCESSING_ERROR: Non-serializable output"}
 
                         except Exception as proc_err:
                             self.log(
@@ -685,7 +663,7 @@ class ExcelMappingApp:
                 all_patient_data_rows.append(patient_results)
 
         self.log("\nDetermining final header order...")
-        final_header_order: List[str] = ["pmid", "family_id", "individual_id"]
+        final_header_order: list[str] = ["pmid", "family_id", "individual_id"]
         for field in COMMON_FIELDS:
             if field != 'pmid' and field in collected_headers and field not in final_header_order:
                 final_header_order.append(field)

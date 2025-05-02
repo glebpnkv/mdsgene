@@ -1,9 +1,7 @@
 import os
 from dotenv import load_dotenv  # для загрузки переменных окружения из .env
-# Загружаем переменные из .env
-load_dotenv()
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import FileResponse
 from typing import List, Dict
 import uuid
 from pathlib import Path
@@ -12,9 +10,11 @@ import logging
 import pandas as pd
 from pydantic import BaseModel
 
-import gemini_processor  # реальная интеграция с модулем обработки
 from gemini_processor import GeminiProcessor
 from excel_mapping_app import ExcelMappingApp
+
+# Загружаем переменные из .env
+load_dotenv()
 
 # Загружаем настройки из окружения
 FOLDER_PATH = Path(os.environ.get("FOLDER_PATH", "../.pdf_docs"))

@@ -61,26 +61,3 @@ class PdfTextExtractor:
             traceback.print_exc()
             return None
 
-
-# --- Example Usage ---
-if __name__ == "__main__":
-    # IMPORTANT: Replace with the actual path to YOUR PDF file
-    # Use raw string (r"...") or forward slashes for paths
-    file_path = r"D:\000333\fine_tune_deepseek_r1\test_pdf\ando2012-22991136.pdf"
-
-    if not Path(file_path).exists():
-        print(f"ERROR: Test PDF file not found at: {file_path}")
-    else:
-        extractor = PdfTextExtractor()
-        extracted_text = extractor.extract_text(file_path)
-
-        if extracted_text:
-            print("Successfully extracted text:")
-            print("------------------------------------")
-            # Print only the first 1000 characters
-            limit = min(len(extracted_text), 1000)
-            print(extracted_text[:limit] + "...")
-            print("------------------------------------")
-            print(f"(Text extraction complete - {len(extracted_text)} characters)")
-        else:
-            print("Failed to extract text from PDF.", file=sys.stderr)
