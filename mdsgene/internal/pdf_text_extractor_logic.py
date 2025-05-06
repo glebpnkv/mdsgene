@@ -6,16 +6,18 @@ import tabula
 import pdfplumber
 
 
-class PdfTextExtractor:
+class PdfTextExtractorLogic:
     """Extracts text content from a PDF file using pypdf with enhanced table handling."""
 
     # pip install tabula-py pdfplumber
 
+    @staticmethod
     def extract_tables_with_tabula(pdf_path):
         # Use tabula for tables
         tables = tabula.read_pdf(pdf_path, pages='all', multiple_tables=True)
         return tables
 
+    @staticmethod
     def extract_text_with_pdfplumber(pdf_path):
         with pdfplumber.open(pdf_path) as pdf:
             text = ""
@@ -23,12 +25,13 @@ class PdfTextExtractor:
                 text += page.extract_text() + "\n"
             return text
 
+    @staticmethod
     def extract_comprehensive(pdf_path):
         # Get tables as structured data
-        tables = extract_tables_with_tabula(pdf_path)
+        tables = PdfTextExtractorLogic.extract_tables_with_tabula(pdf_path)
 
         # Get full text for context
-        full_text = extract_text_with_pdfplumber(pdf_path)
+        full_text = PdfTextExtractorLogic.extract_text_with_pdfplumber(pdf_path)
 
         # Process and combine
         result = {

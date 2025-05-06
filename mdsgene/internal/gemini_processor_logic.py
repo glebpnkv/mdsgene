@@ -1,4 +1,4 @@
-# gemini_processor.py
+# gemini_processor_logic.py
 import os
 import sys
 import json
@@ -6,20 +6,18 @@ import re
 import time
 import traceback
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 
 # Use google.generativeai for Gemini interaction
 from google.api_core import exceptions as google_exceptions # For specific error handling
 from google.genai.types import Part
 from google import genai
 
-# Import necessary structures
-
 # --- Configuration ---
 # It's best practice to load API keys from environment variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Default model, can be overridden in constructor
-DEFAULT_GEMINI_MODEL = "gemini-1.5-flash" # Or "gemini-1.5-pro", etc.
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL") # Or "gemini-1.5-pro", etc.
 # Safety settings to allow potentially sensitive medical info extraction (adjust as needed)
 DEFAULT_SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -38,7 +36,7 @@ DEFAULT_GENERATION_CONFIG = genai.types.GenerationConfig(
 )
 
 
-class GeminiProcessor:
+class GeminiProcessorLogic:
     """Handles interactions with the Gemini API for PDF processing."""
 
     def __init__(self, pdf_filepath: Path, api_key: Optional[str] = None, model_name: str = DEFAULT_GEMINI_MODEL):
@@ -151,7 +149,6 @@ class GeminiProcessor:
     def get_patient_identifiers(self) -> List[Dict[str, Optional[str]]]:
         """
         Uses Gemini to extract a list of patient and family identifiers from the PDF.
-        (This method's logic remains the same, only the underlying API call changes)
         """
         print("\nRequesting patient identifiers from Gemini...")
         extraction_prompt = (
@@ -162,7 +159,6 @@ class GeminiProcessor:
             "Output ONLY the JSON array, without any introductory text, code block markers (like ```json), or explanations."
         )
 
-        # The call now uses the updated _make_gemini_request
         json_text = self._make_gemini_request([extraction_prompt], "patient identification")
 
         if not json_text:
@@ -171,7 +167,6 @@ class GeminiProcessor:
 
         print(f"  Raw Gemini JSON response:\n---\n{json_text}\n---")
 
-        # Parsing logic remains the same
         try:
             match = re.search(r'\[\s*\{.*?\}\s*\]', json_text, re.DOTALL)
             if match:
@@ -217,10 +212,12 @@ class GeminiProcessor:
             traceback.print_exc()
             return []
 
-    def answer_question(self, question_text: str) -> Optional[str]:
+    def answer_question(self, question_text: str) -> Optional[Tuple[str, str]]:
         """
         Asks a specific question to Gemini based on the loaded PDF context.
-        (Logic remains the same)
+
+        Returns:
+            A tuple of (answer, context), or None if the question cannot be answered
         """
         prompt = (
              f"Based *only* on the information contained within the provided document, answer the following question:\n\n"
@@ -228,86 +225,14 @@ class GeminiProcessor:
              f"If the information is not found in the document, state 'Information not found'."
         )
         print(f"  Asking Gemini: {question_text[:100]}...")
-        # The call now uses the updated _make_gemini_request
         raw_answer = self._make_gemini_request([prompt], "question answering")
 
         if raw_answer and ("not found" in raw_answer.lower() or "not stated" in raw_answer.lower() or "not mentioned" in raw_answer.lower()):
              print(f"  Gemini indicated information not found for: '{question_text[:100]}...'")
 
-        return raw_answer
+        # Return both the answer and the prompt as context
+        return (raw_answer, prompt) if raw_answer is not None else None
 
-    def format_answer(self, raw_answer: Optional[str], strategy: str) -> str:
-        """
-        Uses Gemini to format a raw answer according to a specific strategy.
-        (Logic remains the same)
-        """
-        print("  Formatting answer using Gemini...")
-        # Pre-checks remain the same
-        if not raw_answer or raw_answer.strip().lower() in ["", "none", "n/a", "information not found", "not specified", "not reported", "unknown"]:
-            print(f"  Raw answer indicates missing info ('{raw_answer}'). Returning -99.")
-            return "-99"
-        if "error" in raw_answer.lower() or "failed" in raw_answer.lower():
-             print(f"  Raw answer indicates error ('{raw_answer[:50]}...'). Returning -99.")
-             return "-99"
-        if "don't know" in raw_answer.lower() or "couldn't find" in raw_answer.lower() or "not stated" in raw_answer.lower() or "not mentioned" in raw_answer.lower():
-             print(f"  Raw answer indicates info not found ('{raw_answer[:50]}...'). Returning -99.")
-             return "-99"
-
-        # Formatting prompt remains the same
-        formatting_prompt = f"""
-Given the following raw text extracted from a document and a desired formatting strategy, reformat the text.
-
-Raw Text:
-\"\"\"
-{raw_answer}
-\"\"\"
-
-Formatting Strategy / Expected Output:
-\"\"\"
-{strategy}
-\"\"\"
-
-Formatting Rules:
-1.  Follow the strategy precisely.
-2.  Numeric answers (age, counts): Extract ONLY the number. If unknown/not given/not found in raw text, output -99. If explicitly zero/none, output 0.
-3.  Yes/no questions: Output ONLY lowercase "yes" or "no". If unknown/not mentioned/unclear in raw text, output -99.
-4.  Sex: Output ONLY uppercase "M" or "F". If unknown/not reported, output -99.
-5.  Zygosity: Output ONLY "heterozygous", "homozygous", or "hemizygous". If unknown/not applicable, output -99.
-6.  Inclusion decisions (IN/EX): Output ONLY uppercase "IN" or "EX". If unclear, output -99.
-7.  HGNC Gene Symbols: Output the official symbol if found (e.g., "PARK2"). If multiple possibilities, list them comma-separated unless strategy specifies otherwise. If none found or not applicable, output -99.
-8.  Mutation Notation (cDNA/protein): Output the notation as described in the strategy (e.g., c.511C>T, p.Gln171*). Standardize if possible, but preserve original if instructed. If none found/not applicable, output -99.
-9.  General Text/Comments: Extract the relevant information as described. If none found, output -99.
-10. IMPORTANT: Output ONLY the final formatted value. Do NOT include explanations, apologies, or any text like "Formatted answer:", "Based on the text:", "The value is:", etc. JUST the value or -99.
-11. If the Raw Text explicitly states the information is missing (e.g., "not reported", "unknown", "N/A"), output -99.
-
-Formatted Value:"""
-
-        # The call now uses the updated _make_gemini_request
-        formatted_answer = self._make_gemini_request([formatting_prompt], "formatting")
-
-        if formatted_answer is None:
-            print(f"  ERROR: Gemini formatting failed for raw answer: '{raw_answer[:50]}...'. Returning -99.", file=sys.stderr)
-            return "-99"
-
-        # Post-processing cleanup remains the same
-        formatted_answer = formatted_answer.strip()
-        if formatted_answer.startswith('"') and formatted_answer.endswith('"') and len(formatted_answer) > 1:
-            formatted_answer = formatted_answer[1:-1].strip()
-        elif formatted_answer.startswith("'") and formatted_answer.endswith("'") and len(formatted_answer) > 1:
-            formatted_answer = formatted_answer[1:-1].strip()
-
-        preambles = ["formatted value:", "formatted answer:", "the formatted value is:", "output:"]
-        for preamble in preambles:
-            if formatted_answer.lower().startswith(preamble):
-                formatted_answer = formatted_answer[len(preamble):].strip()
-                break
-
-        if not formatted_answer or formatted_answer.lower() in ["unknown", "not stated", "not reported", "n/a", "none", "not applicable", "not mentioned", "-", "null"]:
-            print(f"  Formatted answer resulted in an 'unknown' value ('{formatted_answer}'). Returning -99.")
-            return "-99"
-
-        print(f"  Formatted result: '{formatted_answer}'")
-        return formatted_answer
 
 
     def extract_publication_details(self) -> Dict[str, Optional[str]]:
