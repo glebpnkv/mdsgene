@@ -1,0 +1,20 @@
+{
+  "__patient_identifiers_list_v1__": [
+    {
+      "patient": "AII-11",
+      "family": "A"
+    },
+    {
+      "patient": "BIII-8",
+      "family": "B"
+    },
+    {
+      "patient": "CII-3",
+      "family": "C"
+    },
+    {
+      "patient": "D",
+      "family": null
+    }
+  ]
+}
