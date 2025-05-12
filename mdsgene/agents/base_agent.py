@@ -9,7 +9,7 @@ from typing import Annotated
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
-from ai.ai_processor_client import AIProcessorClient
+from mdsgene.ai_processor_client import AIProcessorClient
 
 load_dotenv()
 

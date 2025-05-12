@@ -4,10 +4,10 @@ import traceback
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-from ai.pmid_extractor import PmidExtractor
-from ai.agents.publication_details_agent import PublicationDetailsAgent
-from ai.agents.patient_identifiers_agent import PatientIdentifiersAgent
-from ai.agents.questions_processing_agent import QuestionsProcessingAgent
+from mdsgene.pmid_extractor import PmidExtractor
+from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
+from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
+from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
 
 def process_pdf_file(pdf_filepath: str) -> Dict[str, Any]:
     """

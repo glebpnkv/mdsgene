@@ -5,8 +5,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
 
-from ai.internal.gemini_processor_logic import GeminiProcessorLogic
-from ai.internal.gemini_text_processor import GeminiTextProcessor
+from mdsgene.internal.gemini_processor_logic import GeminiProcessorLogic
+from mdsgene.internal.gemini_text_processor import GeminiTextProcessor
 
 # Initialize FastAPI app
 app = FastAPI(

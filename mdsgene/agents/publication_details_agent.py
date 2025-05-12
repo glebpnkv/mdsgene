@@ -6,8 +6,8 @@ from typing import Dict, Optional, Any
 from typing import Annotated
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
-from ai.pmid_extractor import PmidExtractor
-from ai.agents.base_agent import BaseAgent
+from mdsgene.pmid_extractor import PmidExtractor
+from mdsgene.agents.base_agent import BaseAgent
 
 # Define the state for our LangGraph
 class State(TypedDict):

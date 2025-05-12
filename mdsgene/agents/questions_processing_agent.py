@@ -7,9 +7,9 @@ from typing import Dict, List, Optional, Any, Union, Tuple
 from typing import Annotated
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
-from ai.agents.base_agent import BaseAgent, CACHE_DIR
-from ai.mapping_item import MappingItem, QuestionInfo
-from ai.document_processor import DocumentProcessor
+from mdsgene.agents.base_agent import BaseAgent, CACHE_DIR
+from mdsgene.mapping_item import MappingItem, QuestionInfo
+from mdsgene.document_processor import DocumentProcessor
 
 # Define the state for our LangGraph
 class State(TypedDict):

@@ -9,8 +9,8 @@ from langchain_core.documents import Document
 # Langchain doesn't have a direct 'Ingestor' class like langchain4j.
 # Ingestion is typically done by calling vector_store.add_documents().
 
-from ai.internal.pdf_text_extractor_logic import PdfTextExtractorLogic # Import from internal module
-from ai.vector_store_client import VectorStoreClient # Import the vector store client
+from mdsgene.internal.pdf_text_extractor_logic import PdfTextExtractorLogic # Import from internal module
+from mdsgene.vector_store_client import VectorStoreClient # Import the vector store client
 
 # Load configuration from environment variables with defaults
 import os

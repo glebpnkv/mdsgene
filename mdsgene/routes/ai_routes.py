@@ -11,17 +11,17 @@ from pathlib import Path
 from uuid import uuid4
 from fastapi.responses import FileResponse
 
-from ai.agents.publication_details_agent import PublicationDetailsAgent
-from ai.agents.patient_identifiers_agent import PatientIdentifiersAgent
-from ai.agents.questions_processing_agent import QuestionsProcessingAgent
-from ai.agents.base_agent import CACHE_DIR
+from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
+from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
+from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
+from mdsgene.agents.base_agent import CACHE_DIR
 from fastapi import Body
 from typing import Any
-from ai.document_processor import DocumentProcessor
+from mdsgene.document_processor import DocumentProcessor
 from langchain_community.vectorstores import FAISS
 
-from ai.cache_utils import delete_document_and_all_related_data
-from ai.vector_store_client import VectorStoreClient
+from mdsgene.cache_utils import delete_document_and_all_related_data
+from mdsgene.vector_store_client import VectorStoreClient
 
 # Path to the PMID cache file
 PMID_CACHE_PATH = os.path.join("cache", "pmid_cache.json")
@@ -87,7 +87,7 @@ def initialize_document_processor(storage_path: str = None, use_vector_store: bo
         Initialized DocumentProcessor
     """
     # Import here to avoid circular imports
-    from ai.vector_store_client import VectorStoreClient
+    from mdsgene.vector_store_client import VectorStoreClient
 
     # Use the provided value or fall back to the environment variable
     use_vs = USE_VECTOR_STORE if use_vector_store is None else use_vector_store
@@ -173,9 +173,9 @@ def process_text_as_pdf(text: str, original_path: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing the processing results
     """
-    from ai.agents.publication_details_agent import PublicationDetailsAgent
-    from ai.agents.patient_identifiers_agent import PatientIdentifiersAgent
-    from ai.agents.questions_processing_agent import QuestionsProcessingAgent
+    from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
+    from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
+    from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
 
     try:
         # Create a temporary file with the text content
@@ -305,7 +305,7 @@ def process_zip_archive(task_id: str, zip_path: str):
                     ensure_patient_identifiers_cached(filename, path)
 
                     # Process PDF using refactored workflow
-                    from ai.workflows.pdf_processing import process_pdf_file
+                    from mdsgene.workflows.pdf_processing import process_pdf_file
                     pdf_results = process_pdf_file(path)
 
                     # Clean up per-file vector store if it was created

@@ -34,17 +34,17 @@ The agents are organized as follows:
 Each agent can be run directly from the command line:
 
 ```bash
-python -m ai.agents.publication_details_agent path/to/pdf
-python -m ai.agents.patient_identifiers_agent path/to/pdf
-python -m ai.agents.questions_processing_agent path/to/pdf
+python -m mdsgene.agents.publication_details_agent path/to/pdf
+python -m mdsgene.agents.patient_identifiers_agent path/to/pdf
+python -m mdsgene.agents.questions_processing_agent path/to/pdf
 ```
 
 Alternatively, you can import and use the agents in your own code:
 
 ```python
-from ai.agents.publication_details_agent import PublicationDetailsAgent
-from ai.agents.patient_identifiers_agent import PatientIdentifiersAgent
-from ai.agents.questions_processing_agent import QuestionsProcessingAgent
+from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
+from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
+from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
 
 # Initialize and set up the agent
 agent = PublicationDetailsAgent()
@@ -71,11 +71,11 @@ agent.print_results(final_state)
 
 The agents depend on the following modules:
 
-- `ai.gemini_processor`: For interacting with the Gemini API
-- `ai.pmid_extractor`: For extracting PMIDs from publication details
-- `ai.pdf_text_extractor`: For extracting text from PDFs
-- `ai.document_processor`: For processing documents and creating vector stores
-- `ai.mapping_item`: For defining mapping items and question info
+- `mdsgene.gemini_processor`: For interacting with the Gemini API
+- `mdsgene.pmid_extractor`: For extracting PMIDs from publication details
+- `mdsgene.pdf_text_extractor`: For extracting text from PDFs
+- `mdsgene.document_processor`: For processing documents and creating vector stores
+- `mdsgene.mapping_item`: For defining mapping items and question info
 
 ## Workflow
 
