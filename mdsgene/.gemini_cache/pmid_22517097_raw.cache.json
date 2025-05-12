@@ -1,7 +1,0 @@
-{
-    "_default_processor_Based on the information in Table 1 on page 1450, the age at onset (AAO, y) for patient FPD-142-1 was 48.": "{\"aao\": \"48\"}",
-    "_default_processor_Based on the information in Table 1 on page 2 of the document:\n\nThe Age at Onset (AAO, y) for patient FPD-142-3 is **59**.": "{\"aao\": \"59\"}",
-    "_default_processor_Based on Table 1 on page 1450, the age at onset (AAO) for patient 'FPD-142-6' is 63.": "{\"aao\": \"63\"}",
-    "_default_processor_Based on the information in Table 1 on page 2, the Age at Onset (AAO, y) for patient 'FPD-258-1' is 38.": "{\"aao\": \"38\"}",
-    "_default_processor_Based on Table 1 on page 2 of the document:\n\nThe Age at Onset (AAO, y) for patient 'FPD-858-6' is **48**.": "{\"aao\": \"48\"}"
-}
