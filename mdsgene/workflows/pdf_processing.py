@@ -1,10 +1,7 @@
-import os
-import json
 import traceback
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, Any
 
-from mdsgene.pmid_extractor import PmidExtractor
 from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
 from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
 from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent

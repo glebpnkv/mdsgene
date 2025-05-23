@@ -1,20 +1,16 @@
+import os
 import sys
 from datetime import timedelta
+from dotenv import load_dotenv  # Loads configuration from environment variables with defaults
 from pathlib import Path
 
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import FAISS # Using FAISS as in-memory store
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
 # Langchain doesn't have a direct 'Ingestor' class like langchain4j.
 # Ingestion is typically done by calling vector_store.add_documents().
 
-from mdsgene.internal.pdf_text_extractor_logic import PdfTextExtractorLogic # Import from internal module
 from mdsgene.vector_store_client import VectorStoreClient # Import the vector store client
-
-# Load configuration from environment variables with defaults
-import os
-from dotenv import load_dotenv
 
 # Try to load environment variables from .env file
 load_dotenv()
@@ -83,7 +79,11 @@ class DocumentProcessor:
             # This will be used by methods that haven't been updated to use the service
             index_file = Path(self._storage_path) / "index.faiss"
             if index_file.exists():
-                self.vector_store = FAISS.load_local(self._storage_path, self.embedding_model, allow_dangerous_deserialization=True)
+                self.vector_store = FAISS.load_local(
+                    folder_path=self._storage_path,
+                    embeddings=self.embedding_model,
+                    allow_dangerous_deserialization=True
+                )
                 print("FAISS Vector Store also loaded directly for backward compatibility.")
             else:
                 self.vector_store = None
@@ -95,7 +95,7 @@ class DocumentProcessor:
     def process_document(self, extracted_pdf_text: str, source_filename: str = "unknown.pdf"):
         """
         Processes the extracted text: splits, embeds, and stores it in FAISS.
-        Checks if document already exists before adding.
+        Checks if the document already exists before adding.
 
         Args:
             extracted_pdf_text: The full text extracted from the PDF.
@@ -129,7 +129,11 @@ class DocumentProcessor:
             # For backward compatibility, reload the vector store
             if self.vector_store is not None:
                 try:
-                    self.vector_store = FAISS.load_local(self._storage_path, self.embedding_model, allow_dangerous_deserialization=True)
+                    self.vector_store = FAISS.load_local(
+                        folder_path=self._storage_path,
+                        embeddings=self.embedding_model,
+                        allow_dangerous_deserialization=True
+                    )
                     print("FAISS Vector Store reloaded after document ingestion.")
                 except Exception as e:
                     print(f"Error reloading vector store: {e}", file=sys.stderr)
@@ -154,7 +158,11 @@ class DocumentProcessor:
         if self.vector_store is None:
             try:
                 print("Vector store not initialized. Attempting to load from disk.")
-                self.vector_store = FAISS.load_local(self._storage_path, self.embedding_model, allow_dangerous_deserialization=True)
+                self.vector_store = FAISS.load_local(
+                    folder_path=self._storage_path,
+                    embeddings=self.embedding_model,
+                    allow_dangerous_deserialization=True
+                )
                 print("FAISS Vector Store loaded successfully.")
             except Exception as e:
                 print(f"Error loading vector store: {e}", file=sys.stderr)
@@ -252,7 +260,10 @@ class DocumentProcessor:
                     break
 
             except Exception as e:
-                print(f"Error searching document content via service (attempt {attempt + 1}/{max_retries}): {e}", file=sys.stderr)
+                print(
+                    f"Error searching document content via service (attempt {attempt + 1}/{max_retries}): {e}",
+                    file=sys.stderr
+                )
 
                 if attempt < max_retries - 1:
                     print(f"Retrying in {retry_delay} seconds...")

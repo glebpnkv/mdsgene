@@ -2,9 +2,9 @@
 import json
 import shutil
 from pathlib import Path
-from typing import Union, Dict, Any, Optional
 
-def delete_pmid_cache(pmid: str, cache_root: Union[str, Path]):
+
+def delete_pmid_cache(pmid: str, cache_root: str | Path):
     """
     Delete the entire cache folder associated with a specific PMID.
 
@@ -22,7 +22,7 @@ def delete_pmid_cache(pmid: str, cache_root: Union[str, Path]):
     except Exception as e:
         print(f"[CacheManager] Error deleting cache folder: {e}")
 
-def remove_document_from_pmid_cache(pdf_filename: str, pmid_cache_path: Union[str, Path]):
+def remove_document_from_pmid_cache(pdf_filename: str, pmid_cache_path: str | Path):
     """
     Remove document entry from pmid_cache.json.
 
@@ -53,8 +53,8 @@ def delete_document_and_all_related_data(
     pdf_filename: str, 
     pmid: str, 
     storage_path: str,
-    cache_root: Union[str, Path],
-    pmid_cache_path: Union[str, Path],
+    cache_root: str | Path,
+    pmid_cache_path: str | Path,
     vector_store_client
 ):
     """

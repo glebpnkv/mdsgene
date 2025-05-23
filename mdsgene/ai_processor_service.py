@@ -1,8 +1,8 @@
 # ai_processor_service.py
 import os
-from typing import Dict, Optional, Any, List, Tuple
+from typing import Dict, Any
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from mdsgene.internal.gemini_processor_logic import GeminiProcessorLogic
@@ -117,14 +117,22 @@ async def format_answer(request: FormatRequest):
             # It will read API key from environment internally
             text_processor = GeminiTextProcessor()
         else:
-             raise HTTPException(status_code=404, detail=f"Text processor '{request.processor_name}' not found for formatting")
+             raise HTTPException(
+                 status_code=404,
+                 detail=f"Text processor '{request.processor_name}' not found for formatting"
+             )
 
         # Call the format_answer method on the text processor instance
         result = text_processor.format_answer(request.raw_answer, request.strategy)
 
         if result is None:
              # This might happen if the Gemini request within format_answer fails
-             return {"formatted_answer": None, "context": None, "success": False, "error": "Failed to format answer via AI Processor"}
+             return {
+                 "formatted_answer": None,
+                 "context": None,
+                 "success": False,
+                 "error": "Failed to format answer via AI Processor"
+             }
 
         formatted_answer, context = result
         # Ensure context is serializable (it should be the raw_answer string here)

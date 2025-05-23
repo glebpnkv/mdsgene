@@ -1,12 +1,11 @@
 import os
 import json
-import random
 import shutil
 import zipfile
 import threading
 import pandas as pd
-from typing import Dict, Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from typing import Any, Dict, Optional
+from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Query
 from pathlib import Path
 from uuid import uuid4
 from fastapi.responses import FileResponse
@@ -15,18 +14,16 @@ from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
 from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
 from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
 from mdsgene.agents.base_agent import CACHE_DIR
-from fastapi import Body
-from typing import Any
-from mdsgene.document_processor import DocumentProcessor
-from langchain_community.vectorstores import FAISS
-
 from mdsgene.cache_utils import delete_document_and_all_related_data
+from mdsgene.document_processor import DocumentProcessor
 from mdsgene.vector_store_client import VectorStoreClient
+from mdsgene.workflows.pdf_processing import process_pdf_file
 
 # Path to the PMID cache file
 PMID_CACHE_PATH = os.path.join("cache", "pmid_cache.json")
 
-def get_pmid_for_filename(filename: str) -> Optional[str]:
+
+def get_pmid_for_filename(filename: str) -> str | None:
     """
     Get the PMID for a given filename by looking it up in the pmid_cache.json file.
 
@@ -127,8 +124,7 @@ def ensure_patient_identifiers_cached(filename: str, file_path: str):
         "patient_identifiers": [],
         "messages": [{"role": "user", "content": f"Extract patient identifiers from {filename}"}]
     }
-    final_state = agent.run(initial_state)
-    # final_state.patient_identifiers will be cached via agent.save_cache()
+    _ = agent.run(initial_state)
 
 # In-memory storage for tracking PDF analysis progress
 # In a production environment, this should be replaced with a database
@@ -191,7 +187,7 @@ def process_text_as_pdf(text: str, original_path: str) -> Dict[str, Any]:
             "publication_details": None,
             "pmid": None,
             "messages": [
-                {"role": "user", "content": f"Extract publication details and PMID from text file"}
+                {"role": "user", "content": "Extract publication details and PMID from text file"}
             ]
         }
         pub_final_state = pub_agent.run(pub_state)
@@ -206,7 +202,7 @@ def process_text_as_pdf(text: str, original_path: str) -> Dict[str, Any]:
             "pdf_filepath": temp_file_path,
             "patient_identifiers": [],
             "messages": [
-                {"role": "user", "content": f"Extract patient identifiers from text file"}
+                {"role": "user", "content": "Extract patient identifiers from text file"}
             ]
         }
         patient_final_state = patient_agent.run(patient_state)
@@ -223,7 +219,7 @@ def process_text_as_pdf(text: str, original_path: str) -> Dict[str, Any]:
             "vector_store": None,
             "pmid": pmid,
             "messages": [
-                {"role": "user", "content": f"Process questions for patients in text file"}
+                {"role": "user", "content": "Process questions for patients in text file"}
             ]
         }
         questions_final_state = questions_agent.run(questions_state)
@@ -277,7 +273,11 @@ def process_zip_archive(task_id: str, zip_path: str):
         total = len(file_paths)
 
         if total == 0:
-            zip_analysis_progress[task_id] = {"status": "error", "progress": 0, "message": "No files found in ZIP archive"}
+            zip_analysis_progress[task_id] = {
+                "status": "error",
+                "progress": 0,
+                "message": "No files found in ZIP archive"
+            }
             # Clean up
             shutil.rmtree(extract_dir)
             os.remove(zip_path)
@@ -293,19 +293,11 @@ def process_zip_archive(task_id: str, zip_path: str):
                 if ext == ".pdf":
                     filename = os.path.basename(path)
 
-                    # Create per-file VectorStore, if enabled
-                    if USE_VECTOR_STORE:
-                        vs_dir = get_file_vector_store_dir(task_id, filename)
-                        processor = initialize_document_processor(storage_path=vs_dir, use_vector_store=True)
-                    else:
-                        # Initialize without VectorStore
-                        processor = initialize_document_processor(storage_path=None, use_vector_store=False)
-
                     # Cache patient identifiers
                     ensure_patient_identifiers_cached(filename, path)
 
                     # Process PDF using refactored workflow
-                    from mdsgene.workflows.pdf_processing import process_pdf_file
+
                     pdf_results = process_pdf_file(path)
 
                     # Clean up per-file vector store if it was created
@@ -336,7 +328,10 @@ def process_zip_archive(task_id: str, zip_path: str):
                                 "vector_store": None,
                                 "pmid": pmid,
                                 "messages": [
-                                    {"role": "user", "content": f"Process questions for patients in {os.path.basename(path)}"}
+                                    {
+                                        "role": "user",
+                                        "content": f"Process questions for patients in {os.path.basename(path)}"
+                                    }
                                 ]
                             }
                             try:
@@ -536,7 +531,8 @@ async def download_zip_results(task_id: str = Query(..., description="Task ID fr
     if task_status.get("status") != "done":
         raise HTTPException(
             status_code=404, 
-            detail=f"Results not ready. Current status: {task_status.get('status')}, progress: {task_status.get('progress')}%"
+            detail=f"Results not ready. Current status: {task_status.get('status')}, "
+                   f"progress: {task_status.get('progress')}%"
         )
 
     # Check if results file exists
@@ -766,7 +762,7 @@ async def process_patient_questions(filename: str = Query(..., description="File
                 "patient_identifiers_count": len(final_state.get("patient_identifiers", [])),
                 "patient_answers": final_state.get("patient_answers", [])
             }
-        except ValueError as e:
+        except ValueError:
             # This catches the specific error when patient identifiers are not found in cache
             raise HTTPException(
                 status_code=400,
@@ -1438,7 +1434,10 @@ async def get_cached_response(
 
 @router.delete("/cache")
 async def clear_cache(
-    agent_type: Optional[str] = Query(None, description="Type of agent cache to clear (publication_details, patient_identifiers, questions_processing)"),
+    agent_type: Optional[str] = Query(
+        default=None,
+        description="Type of agent cache to clear (publication_details, patient_identifiers, questions_processing)"
+    ),
     pmid: Optional[str] = Query(None, description="PMID of the document whose cache to clear")
 ):
     """
@@ -1556,7 +1555,8 @@ async def clear_cache(
                     }
                 else:
                     return {
-                        "message": f"No cache file found for agent type '{agent_type}' and PMID '{pmid}', nothing to clear"
+                        "message": f"No cache file found for agent type '{agent_type}' and PMID '{pmid}', "
+                                   f"nothing to clear"
                     }
             else:
                 return {

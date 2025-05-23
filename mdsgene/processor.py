@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+
 
 class Processor(ABC):
     """
@@ -9,7 +9,7 @@ class Processor(ABC):
     """
 
     @abstractmethod
-    def answer_question(self, question: str) -> Optional[Tuple[str, str]]:
+    def answer_question(self, question: str) -> tuple[str, str] | None:
         """
         Answer a question based on the processor's knowledge/context.
 

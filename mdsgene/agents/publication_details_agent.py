@@ -1,7 +1,6 @@
 import sys
 import uuid
 from pathlib import Path
-from typing import Dict, Optional, Any
 
 from typing import Annotated
 from langgraph.graph.message import add_messages
@@ -9,12 +8,14 @@ from typing_extensions import TypedDict
 from mdsgene.pmid_extractor import PmidExtractor
 from mdsgene.agents.base_agent import BaseAgent
 
+
 # Define the state for our LangGraph
 class State(TypedDict):
     pdf_filepath: str
-    publication_details: Optional[Dict[str, str]]
-    pmid: Optional[str]
+    publication_details: dict[str, str] | None
+    pmid: str | None
     messages: Annotated[list, add_messages]
+
 
 class PublicationDetailsAgent(BaseAgent[State]):
     """Agent for extracting publication details from PDFs."""
@@ -45,7 +46,10 @@ class PublicationDetailsAgent(BaseAgent[State]):
                     "publication_details": pub_details,
                     "pmid": pmid,
                     "messages": state["messages"] + [
-                        {"role": "assistant", "content": f"Publication details and PMID loaded from cache: {pub_details}"}
+                        {
+                            "role": "assistant",
+                            "content": f"Publication details and PMID loaded from cache: {pub_details}"
+                        }
                     ]
                 }
             else:
@@ -53,7 +57,10 @@ class PublicationDetailsAgent(BaseAgent[State]):
                     **state,
                     "publication_details": pub_details,
                     "messages": state["messages"] + [
-                        {"role": "assistant", "content": f"Publication details loaded from cache: {pub_details}"}
+                        {
+                            "role": "assistant",
+                            "content": f"Publication details loaded from cache: {pub_details}"
+                        }
                     ]
                 }
 
@@ -205,6 +212,7 @@ class PublicationDetailsAgent(BaseAgent[State]):
                 print(f"Error saving PDF with PMID filename: {e}")
                 import traceback
                 traceback.print_exc()
+
 
 def main():
     """Run the agent if this file is executed directly."""

@@ -1,31 +1,31 @@
-import sys
-import json
 import hashlib
+import json
+import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union, Tuple
 
 from typing import Annotated
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 from mdsgene.agents.base_agent import BaseAgent, CACHE_DIR
 from mdsgene.mapping_item import MappingItem, QuestionInfo
-from mdsgene.document_processor import DocumentProcessor
+
 
 # Define the state for our LangGraph
 class State(TypedDict):
     pdf_filepath: str
-    mapping_items: List[MappingItem]
-    patient_identifiers: List[Dict[str, Optional[str]]]
-    patient_questions: List[List[QuestionInfo]]
-    patient_answers: List[Dict[str, str]]
+    mapping_items: list[MappingItem]
+    patient_identifiers: list[dict[str, str | None]]
+    patient_questions: list[list[QuestionInfo]]
+    patient_answers: list[dict[str, str]]
     messages: Annotated[list, add_messages]
+
 
 class QuestionsProcessingAgent(BaseAgent[State]):
     """Agent for processing questions mapping data from PDFs."""
 
     def __init__(self, pmid: str = None):
         """
-        Initialize the questions processing agent.
+        Initialize the question processing agent.
 
         Args:
             pmid: PMID of the document (optional)
@@ -62,7 +62,7 @@ class QuestionsProcessingAgent(BaseAgent[State]):
             # Create a hash of just the query text if PMID is not available
             return hashlib.md5(query_text.encode('utf-8')).hexdigest()
 
-    def load_from_cache(self, cache_identifier: str) -> Optional[Dict[str, str]]:
+    def load_from_cache(self, cache_identifier: str) -> dict[str, str] | None:
         """
         Load a cached answer from the cache file.
 
@@ -93,7 +93,7 @@ class QuestionsProcessingAgent(BaseAgent[State]):
 
         return None
 
-    def get_cached_questions(self, all_pmids: bool = False) -> List[Dict[str, str]]:
+    def get_cached_questions(self, all_pmids: bool = False) -> list[dict[str, str]]:
         """
         Get cached questions for the current PMID or all PMIDs.
 
@@ -123,7 +123,7 @@ class QuestionsProcessingAgent(BaseAgent[State]):
 
         return questions
 
-    def _get_questions_for_pmid(self, pmid_dir: Path, pmid: str) -> List[Dict[str, str]]:
+    def _get_questions_for_pmid(self, pmid_dir: Path, pmid: str) -> list[dict[str, str]]:
         """
         Helper method to get questions for a specific PMID directory.
 
@@ -235,7 +235,11 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                 **state,
                 "mapping_items": mapping_data,
                 "messages": state["messages"] + [
-                    {"role": "assistant", "content": f"Loaded {active_items} active mapping items from JSON (skipped {skipped_items} inactive items)."}
+                    {
+                        "role": "assistant",
+                        "content": f"Loaded {active_items} active mapping items from JSON "
+                                   f"(skipped {skipped_items} inactive items)."
+                    }
                 ]
             }
         except Exception as e:
@@ -271,7 +275,8 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                 print("  ERROR: Failed to parse cached patient identifiers.")
 
         if not loaded_from_cache:
-            error_msg = "ERROR: Patient identifiers not found in cache. This agent requires pre-cached patient identifiers."
+            error_msg = ("ERROR: Patient identifiers not found in cache. "
+                         "This agent requires pre-cached patient identifiers.")
             print(error_msg)
             raise ValueError(error_msg)
 
@@ -329,7 +334,8 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                         field=item.field,
                         query=specific_query,
                         response_convertion_strategy=item.response_convertion_strategy,
-                        query_processor=item.query_processor or "gemini", # Use "gemini" as fallback if query_processor is None
+                        # Use "gemini" as a fallback if query_processor is None
+                        query_processor=item.query_processor or "gemini",
                         family_id=family_id,
                         patient_id=patient_id
                     )
@@ -346,7 +352,10 @@ class QuestionsProcessingAgent(BaseAgent[State]):
             **state,
             "patient_questions": list_of_patient_question_sets,
             "messages": state["messages"] + [
-                {"role": "assistant", "content": f"Generated question sets for {len(list_of_patient_question_sets)} patients."}
+                {
+                    "role": "assistant",
+                    "content": f"Generated question sets for {len(list_of_patient_question_sets)} patients."
+                }
             ]
         }
 
@@ -378,7 +387,10 @@ class QuestionsProcessingAgent(BaseAgent[State]):
 
             current_patient_id = patient_question_set[0].patient_id or "UnknownPatient"
             current_family_id = patient_question_set[0].family_id
-            print(f"\n=== Processing Patient Set {patient_num} (Patient: '{current_patient_id}', Family: '{current_family_id or 'N/A'}') ===")
+            print(
+                f"\n=== Processing Patient Set {patient_num} "
+                f"(Patient: '{current_patient_id}', Family: '{current_family_id or 'N/A'}') ==="
+            )
 
             patient_results = {}
             patient_results["family_id"] = current_family_id or "-99"
@@ -399,23 +411,25 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                     print(f"  Using cached answer: {raw_answer[:50]}...")
                     print(f"  Using cached context: {context[:50] if context else 'None'}...")
                 else:
-                    # Use AIProcessorClient to get answer
+                    # Use AIProcessorClient to get the answer
                     raw_answer = None
                     context = None
                     try:
-                        print(f"  Using AIProcessorClient for query: {query_text[:50]}...")
-                        processor_name = getattr(q_obj, "query_processor", "gemini")  # Use query_processor if available, default to "gemini"
+                        print(f"Using AIProcessorClient for query: {query_text[:50]}...")
+
+                        # Use query_processor if available, default to "gemini"
+                        processor_name = getattr(q_obj, "query_processor", "gemini")
                         result = self.ai_processor_client.answer_question(pdf_filepath, query_text, processor_name)
                         if result:
                             raw_answer, context = result
-                            print(f"  AIProcessorClient found answer: {raw_answer[:50]}...")
-                            print(f"  AIProcessorClient context: {context[:50] if context else 'None'}...")
+                            print(f"AIProcessorClient found answer: {raw_answer[:50]}...")
+                            print(f"AIProcessorClient context: {context[:50] if context else 'None'}...")
                             # Save to cache if we got an answer
                             self.save_to_cache(cache_identifier, raw_answer, query_text, context)
                         else:
-                            print(f"  AIProcessorClient returned no answer.")
+                            print("AIProcessorClient returned no answer.")
                     except Exception as processor_err:
-                        print(f"  ERROR using AIProcessorClient: {processor_err}")
+                        print(f"ERROR using AIProcessorClient: {processor_err}")
                         raw_answer = None
                         context = None
 
@@ -423,7 +437,9 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                 if raw_answer:
                     try:
                         # Generate a cache identifier for the formatting request
-                        format_cache_identifier = self.generate_cache_identifier(f"format_{raw_answer}_{q_obj.response_convertion_strategy}")
+                        format_cache_identifier = self.generate_cache_identifier(
+                            query_text=f"format_{raw_answer}_{q_obj.response_convertion_strategy}"
+                        )
 
                         # Try to load formatted answer from cache first
                         cached_format_data = self.load_from_cache(format_cache_identifier)
@@ -431,25 +447,40 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                         if cached_format_data is not None:
                             formatted_answer = cached_format_data.get("raw_answer")
                             format_context = cached_format_data.get("context")
-                            print(f"  Using cached formatted answer: {formatted_answer}")
-                            print(f"  Using cached format context: {format_context[:50] if format_context else 'None'}...")
+                            print(f"Using cached formatted answer: {formatted_answer}")
+                            print(
+                                f"Using cached format context: {format_context[:50] if format_context else 'None'}..."
+                            )
                         else:
                             # Use AIProcessorClient for formatting
                             formatted_answer = None
                             format_context = None
                             try:
-                                print(f"  Using AIProcessorClient for formatting...")
-                                processor_name = getattr(q_obj, "query_processor", "gemini")  # Use query_processor if available, default to "gemini"
-                                format_result = self.ai_processor_client.format_answer(raw_answer, q_obj.response_convertion_strategy, processor_name)
+                                print("Using AIProcessorClient for formatting...")
+                                # Use query_processor if available, default to "gemini"
+                                processor_name = getattr(q_obj, "query_processor", "gemini")
+                                format_result = self.ai_processor_client.format_answer(
+                                    raw_answer,
+                                    q_obj.response_convertion_strategy,
+                                    processor_name
+                                )
                                 if format_result:
                                     formatted_answer, format_context = format_result
-                                    print(f"  AIProcessorClient formatted answer: {formatted_answer}")
-                                    print(f"  AIProcessorClient format context: {format_context[:50] if format_context else 'None'}...")
-                                    # Save formatted answer to cache
+                                    print(f"AIProcessorClient formatted answer: {formatted_answer}")
+                                    print(
+                                        f"AIProcessorClient format context: "
+                                        f"{format_context[:50] if format_context else 'None'}..."
+                                    )
+                                    # Save formated answer to cache
                                     format_question = f"Format answer for: {query_text}"
-                                    self.save_to_cache(format_cache_identifier, formatted_answer, format_question, format_context)
+                                    self.save_to_cache(
+                                        format_cache_identifier,
+                                        formatted_answer,
+                                        format_question,
+                                        format_context
+                                    )
                                 else:
-                                    print(f"  AIProcessorClient returned no formatted answer.")
+                                    print("  AIProcessorClient returned no formatted answer.")
                             except Exception as format_err:
                                 print(f"  ERROR using AIProcessorClient for formatting: {format_err}")
                                 formatted_answer = None
@@ -467,7 +498,7 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                         patient_results[q_obj.field] = "-99_FORMAT_ERROR"
                 else:
                     patient_results[q_obj.field] = "-99_NO_ANSWER"
-                    print(f"  No answer found. Using default: -99_NO_ANSWER")
+                    print("  No answer found. Using default: -99_NO_ANSWER")
 
             all_patient_data_rows.append(patient_results)
 
@@ -501,6 +532,7 @@ class QuestionsProcessingAgent(BaseAgent[State]):
 
         # Call the base class method to print the conversation
         super().print_results(final_state)
+
 
 def main():
     """Run the agent if this file is executed directly."""
@@ -550,6 +582,7 @@ def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

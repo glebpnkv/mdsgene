@@ -1,34 +1,36 @@
-import os
 import json
-import traceback
+import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Any, TypeVar, Generic, Callable, Union
+from typing import Any, Callable, Generic, TypeVar
 
 from dotenv import load_dotenv
-from typing import Annotated
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
+from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
+
 from mdsgene.ai_processor_client import AIProcessorClient
 
 load_dotenv()
+
+# Get a logger for this module
+logger = logging.getLogger(__name__)
 
 # Define cache directory
 CACHE_DIR = Path("cache")
 if not CACHE_DIR.exists():
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        print(f"Cache directory created at: {CACHE_DIR}")
+        logger.info(f"Cache directory created at: {CACHE_DIR}")
     except Exception as e:
-        print(f"Error creating cache directory: {e}")
+        logger.error(f"Error creating cache directory: {e}")
 
 # Generic type for state
 T = TypeVar('T', bound=TypedDict)
 
+
 class BaseAgent(Generic[T]):
     """Base class for all agents that use GeminiProcessor."""
 
-    def __init__(self, name: str, cache_file: str, pmid: Optional[str] = None):
+    def __init__(self, name: str, cache_file: str, pmid: str | None = None):
         """
         Initialize the base agent.
 
@@ -47,9 +49,9 @@ class BaseAgent(Generic[T]):
             if not pmid_dir.exists():
                 try:
                     pmid_dir.mkdir(parents=True, exist_ok=True)
-                    print(f"PMID-specific cache directory created at: {pmid_dir}")
+                    logger.info(f"PMID-specific cache directory created at: {pmid_dir}")
                 except Exception as e:
-                    print(f"Error creating PMID-specific cache directory: {e}")
+                    logger.error(f"Error creating PMID-specific cache directory: {e}")
 
             # Use PMID-specific path for patient_cache.json
             self.cache_file_path = pmid_dir / cache_file
@@ -60,19 +62,19 @@ class BaseAgent(Generic[T]):
         self.graph = None
 
 
-    def load_cache(self) -> Dict[str, Any]:
+    def load_cache(self) -> dict[str, Any]:
         """Load cache from file."""
         if self.cache_file_path.exists():
             with open(self.cache_file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {}
 
-    def save_cache(self, cache: Dict[str, Any]):
+    def save_cache(self, cache: dict[str, Any]):
         """Save cache to file."""
         with open(self.cache_file_path, "w", encoding="utf-8") as f:
             json.dump(cache, f, indent=2, ensure_ascii=False)
 
-    def build_graph(self, state_class: type, nodes: Dict[str, Callable[[T], T]]) -> StateGraph:
+    def build_graph(self, state_class: type, nodes: dict[str, Callable[[T], T]]) -> StateGraph:
         """
         Build the LangGraph for the agent.
 
@@ -89,7 +91,7 @@ class BaseAgent(Generic[T]):
         for node_name, node_func in nodes.items():
             graph_builder.add_node(node_name, node_func)
 
-        # Add edges - first node connects to START, last node connects to END
+        # Add edges - the first node connects to START, the last node connects to END
         node_names = list(nodes.keys())
         graph_builder.add_edge(START, node_names[0])
 
@@ -127,7 +129,7 @@ class BaseAgent(Generic[T]):
             final_state: The final state after running the agent
         """
         # Print the conversation
-        print("\n=== Conversation ===")
+        logger.info("=== Conversation ===")
         for message in final_state["messages"]:
             # Handle both dict-style messages and LangChain message objects
             if hasattr(message, "type") and hasattr(message, "content"):
@@ -140,7 +142,7 @@ class BaseAgent(Generic[T]):
                 content = message["content"]
             else:
                 # Unknown message format, print what we can
-                print(f"Unknown message format: {message}")
+                logger.warning(f"Unknown message format: {message}")
                 continue
 
-            print(f"{role.upper()}: {content}")
+            logger.info(f"{role.upper()}: {content}")

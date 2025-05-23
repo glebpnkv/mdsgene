@@ -1,13 +1,13 @@
 # ai_processor_client.py
 import os
 import requests
-from typing import Dict, Optional, Any, List, Tuple
-from pathlib import Path
+from typing import Any
+
 
 class AIProcessorClient:
     """Client for interacting with the AI Processor Service."""
     
-    def __init__(self, service_url: Optional[str] = None):
+    def __init__(self, service_url: str | None = None):
         """
         Initialize the AI Processor Client.
         
@@ -17,7 +17,7 @@ class AIProcessorClient:
         """
         self.service_url = service_url or os.getenv("AI_PROCESSOR_SERVICE_URL", "http://localhost:8001")
         
-    def _make_request(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _make_request(self, endpoint: str, data: dict[str, Any]) -> dict[str, Any]:
         """
         Make a request to the AI Processor Service.
         
@@ -43,7 +43,12 @@ class AIProcessorClient:
             # Handle other errors
             raise Exception(f"Error in AI Processor Service request: {str(e)}")
     
-    def answer_question(self, pdf_filepath: str, question: str, processor_name: str = "gemini") -> Optional[Tuple[str, str]]:
+    def answer_question(
+        self,
+        pdf_filepath: str,
+        question: str,
+        processor_name: str = "gemini"
+    ) -> tuple[str, str] | None:
         """
         Answer a question based on the content of a PDF file.
         
@@ -73,7 +78,12 @@ class AIProcessorClient:
             print(f"Failed to answer question: {str(e)}")
             return None
     
-    def format_answer(self, raw_answer: str, strategy: str, processor_name: str = "gemini") -> Optional[Tuple[str, str]]:
+    def format_answer(
+        self,
+        raw_answer: str,
+        strategy: str,
+        processor_name: str = "gemini"
+    ) -> tuple[str, str] | None:
         """
         Format a raw answer according to a specific strategy.
         
@@ -103,7 +113,11 @@ class AIProcessorClient:
             print(f"Failed to format answer: {str(e)}")
             return None
     
-    def get_patient_identifiers(self, pdf_filepath: str, processor_name: str = "gemini") -> List[Dict[str, Optional[str]]]:
+    def get_patient_identifiers(
+        self,
+        pdf_filepath: str,
+        processor_name: str = "gemini"
+    ) -> tuple[str, str] | None:
         """
         Extract patient identifiers from a PDF file.
         
@@ -131,7 +145,11 @@ class AIProcessorClient:
             print(f"Failed to get patient identifiers: {str(e)}")
             return []
     
-    def extract_publication_details(self, pdf_filepath: str, processor_name: str = "gemini") -> Dict[str, Optional[str]]:
+    def extract_publication_details(
+        self,
+        pdf_filepath: str,
+        processor_name: str = "gemini"
+    ) -> tuple[str, str] | None:
         """
         Extract publication details from a PDF file.
         

@@ -13,18 +13,15 @@ from google.api_core import exceptions as google_exceptions # For specific error
 from google.genai.types import Part
 from google import genai
 
-# --- Configuration ---
+from mdsgene.internal.defines import NO_INFORMATION_LIST, DEFAULT_SAFETY_SETTINGS
+
+# Configuration
 # It's best practice to load API keys from environment variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# Default model, can be overridden in constructor
+# Default model - this can be overridden in the constructor
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL") # Or "gemini-1.5-pro", etc.
 # Safety settings to allow potentially sensitive medical info extraction (adjust as needed)
-DEFAULT_SAFETY_SETTINGS = [
-    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-]
+
 # Generation config (optional, adjust temperature etc. if needed)
 DEFAULT_GENERATION_CONFIG = genai.types.GenerationConfig(
     # candidate_count=1, # Default is 1
@@ -69,7 +66,7 @@ class GeminiProcessorLogic:
             raise
 
         self.pdf_filepath = pdf_filepath
-        self.pdf_parts: Optional[List[Part]] = None
+        self.pdf_parts: list[Part] | None = None
         self._load_pdf() # Load PDF during initialization
 
     def _load_pdf(self):
@@ -85,7 +82,7 @@ class GeminiProcessorLogic:
             print(f"Error reading PDF file {self.pdf_filepath}: {e}", file=sys.stderr)
             self.pdf_parts = None # Ensure it's None if loading fails
 
-    def _make_gemini_request(self, prompt_parts: List[Any], task_description: str) -> Optional[str]:
+    def _make_gemini_request(self, prompt_parts: list[Any], task_description: str) -> str | None:
         """Makes a request to the Gemini API using the client with retry logic."""
         if not self.pdf_parts and task_description != "formatting":
              print("ERROR: PDF parts not loaded, cannot make request.", file=sys.stderr)
@@ -104,45 +101,52 @@ class GeminiProcessorLogic:
             try:
                 print(f"  Attempting Gemini request ({task_description})... (Attempt {attempt + 1}/{max_retries})")
 
-                # --- Call using client.models.generate_content ---
+                # Call using client.models.generate_content ---
                 response = self.client.models.generate_content(
                     model=f"models/{self.model_name}", # Model name needs 'models/' prefix for client API
                     contents=contents,
                     # safety_settings=self.safety_settings,
                     # generation_config=self.generation_config
                 )
-                # --- End Change ---
+                # End Change
 
                 if hasattr(response, 'text'):
-                     print(f"  Gemini request successful ({task_description}).")
+                     print(f"Gemini request successful ({task_description}).")
                      return response.text.strip()
                 else:
-                     print(f"  WARNING: Gemini response for '{task_description}' has no text. Response details: {response.prompt_feedback}", file=sys.stderr)
+                     print(
+                         f"WARNING: Gemini response for '{task_description}' has no text. "
+                         f"Response details: {response.prompt_feedback}",
+                         file=sys.stderr
+                     )
                      return None
 
             except google_exceptions.ResourceExhausted as e:
-                print(f"  WARNING: Gemini API quota exceeded: {e}. Retrying in {delay}s...", file=sys.stderr)
+                print(f"WARNING: Gemini API quota exceeded: {e}. Retrying in {delay}s...", file=sys.stderr)
                 time.sleep(delay)
                 delay *= 2
             except google_exceptions.ServiceUnavailable as e:
-                 print(f"  WARNING: Gemini service unavailable: {e}. Retrying in {delay}s...", file=sys.stderr)
+                 print(f"WARNING: Gemini service unavailable: {e}. Retrying in {delay}s...", file=sys.stderr)
                  time.sleep(delay)
                  delay *= 2
             except google_exceptions.InternalServerError as e:
-                 print(f"  WARNING: Gemini internal server error: {e}. Retrying in {delay}s...", file=sys.stderr)
+                 print(f"WARNING: Gemini internal server error: {e}. Retrying in {delay}s...", file=sys.stderr)
                  time.sleep(delay)
                  delay *= 2
             # Handle potential InvalidArgument errors (e.g., bad model name)
             except google_exceptions.InvalidArgument as e:
-                 print(f"  ERROR: Invalid argument for Gemini API call ({task_description}): {e}", file=sys.stderr)
-                 print(f"  Check if model name '{self.model_name}' is valid and correctly formatted ('models/...') for the client API.")
+                 print(f"ERROR: Invalid argument for Gemini API call ({task_description}): {e}", file=sys.stderr)
+                 print(
+                     f"Check if model name '{self.model_name}' is valid and correctly formatted ('models/...') "
+                     f"for the client API."
+                 )
                  return None # Don't retry on invalid argument
             except Exception as e:
-                print(f"  ERROR: Unhandled exception during Gemini API call ({task_description}): {e}", file=sys.stderr)
+                print(f"ERROR: Unhandled exception during Gemini API call ({task_description}): {e}", file=sys.stderr)
                 traceback.print_exc()
                 return None
 
-        print(f"  ERROR: Gemini request failed after {max_retries} attempts ({task_description}).", file=sys.stderr)
+        print(f"ERROR: Gemini request failed after {max_retries} attempts ({task_description}).", file=sys.stderr)
         return None
 
 
@@ -153,10 +157,13 @@ class GeminiProcessorLogic:
         print("\nRequesting patient identifiers from Gemini...")
         extraction_prompt = (
             "Based on the provided document, extract a list of all distinct patient cases mentioned. "
-            "For each case, identify the specific patient identifier (e.g., 'Patient 1', 'II-1', 'P3') and the family identifier if available (e.g., 'Family A', 'F1'). "
-            "Present the result STRICTLY as a JSON array of objects. Each object must have two keys: 'family' (string or null) and 'patient' (string). "
+            "For each case, identify the specific patient identifier (e.g., 'Patient 1', 'II-1', 'P3') and the "
+            "family identifier if available (e.g., 'Family A', 'F1'). "
+            "Present the result STRICTLY as a JSON array of objects. Each object must have two keys: 'family' "
+            "(string or null) and 'patient' (string). "
             "Example: [{'family': 'Family 1', 'patient': 'II-1'}, {'family': null, 'patient': 'Patient 2'}]"
-            "Output ONLY the JSON array, without any introductory text, code block markers (like ```json), or explanations."
+            "Output ONLY the JSON array, without any introductory text, code block markers (like ```json), "
+            "or explanations."
         )
 
         json_text = self._make_gemini_request([extraction_prompt], "patient identification")
@@ -191,7 +198,9 @@ class GeminiProcessorLogic:
                 patient_id_raw = entry.get("patient")
                 family_id_raw = entry.get("family")
                 patient_id = str(patient_id_raw).strip() if patient_id_raw is not None else None
-                family_id = str(family_id_raw).strip() if family_id_raw is not None and str(family_id_raw).strip().lower() != 'null' else None
+                family_id = str(family_id_raw).strip() \
+                    if (family_id_raw is not None and str(family_id_raw).strip().lower() != 'null') \
+                    else None
                 if not patient_id:
                     print(f"WARNING: Skipping entry with missing patient identifier: {entry}", file=sys.stderr)
                     continue
@@ -220,22 +229,21 @@ class GeminiProcessorLogic:
             A tuple of (answer, context), or None if the question cannot be answered
         """
         prompt = (
-             f"Based *only* on the information contained within the provided document, answer the following question:\n\n"
-             f"{question_text}\n\n"
+             f"Based *only* on the information contained within the provided document, "
+             f"answer the following question:\n"
+             f"{question_text}\n"
              f"If the information is not found in the document, state 'Information not found'."
         )
-        print(f"  Asking Gemini: {question_text[:100]}...")
+        print(f"Asking Gemini: {question_text[:100]}...")
         raw_answer = self._make_gemini_request([prompt], "question answering")
 
-        if raw_answer and ("not found" in raw_answer.lower() or "not stated" in raw_answer.lower() or "not mentioned" in raw_answer.lower()):
-             print(f"  Gemini indicated information not found for: '{question_text[:100]}...'")
+        if raw_answer and raw_answer.lower() in NO_INFORMATION_LIST:
+             print(f"Gemini indicated information not found for: '{question_text[:100]}...'")
 
         # Return both the answer and the prompt as context
         return (raw_answer, prompt) if raw_answer is not None else None
 
-
-
-    def extract_publication_details(self) -> Dict[str, Optional[str]]:
+    def extract_publication_details(self) -> dict[str, str | None]:
         """
         Uses Gemini to extract key publication details (title, author, year) from the PDF.
 
@@ -250,13 +258,17 @@ class GeminiProcessorLogic:
             "2. The last name of the *first* author listed.\n"
             "3. The four-digit publication year.\n\n"
             "Present the result STRICTLY as a JSON object with the keys 'title', 'first_author_lastname', and 'year'.\n"
-            "Example: {\"title\": \"Actual Title of Paper\", \"first_author_lastname\": \"Smith\", \"year\": \"2023\"}\n"
-            "Output ONLY the JSON object, without any introductory text, code block markers (like ```json), or explanations."
-            " If any detail cannot be found, use a null value for that key."
+            "Example: {\"title\": \"Actual Title of Paper\", \"first_author_lastname\": \"Smith\", "
+            "\"year\": \"2023\"}\n"
+            "Output ONLY the JSON object, without any introductory text, code block markers (like ```json), "
+            "or explanations. If any detail cannot be found, use a null value for that key."
         )
 
         # This request only needs the PDF context
-        json_text = self._make_gemini_request([extraction_prompt], "publication detail extraction")
+        json_text = self._make_gemini_request(
+            prompt_parts=[extraction_prompt],
+            task_description="publication detail extraction"
+        )
 
         details = {'title': None, 'first_author_lastname': None, 'year': None} # Default values
 
@@ -275,7 +287,10 @@ class GeminiProcessorLogic:
             elif json_text.strip().startswith('{') and json_text.strip().endswith('}'):
                  json_object_text = json_text.strip()
             else:
-                 print("ERROR: Could not find a valid JSON object structure in the response for details.", file=sys.stderr)
+                 print(
+                     "ERROR: Could not find a valid JSON object structure in the response for details.",
+                     file=sys.stderr
+                 )
                  print(f"Received text: {json_text}")
                  return details # Return defaults
 
@@ -286,7 +301,8 @@ class GeminiProcessorLogic:
 
             # Extract details, handling potential missing keys or null values
             details['title'] = str(parsed_json.get('title')).strip() if parsed_json.get('title') else None
-            details['first_author_lastname'] = str(parsed_json.get('first_author_lastname')).strip() if parsed_json.get('first_author_lastname') else None
+            details['first_author_lastname'] = str(parsed_json.get('first_author_lastname')).strip() \
+                if parsed_json.get('first_author_lastname') else None
             details['year'] = str(parsed_json.get('year')).strip() if parsed_json.get('year') else None
 
             # Basic validation

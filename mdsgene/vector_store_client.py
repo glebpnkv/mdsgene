@@ -1,7 +1,7 @@
 # vector_store_client.py
 import requests
-from pathlib import Path
-from typing import Dict, Optional, Any, List
+from typing import Any
+
 
 class VectorStoreClient:
     """Client for interacting with the Vector Store Service."""
@@ -15,7 +15,7 @@ class VectorStoreClient:
         """
         self.service_url = service_url
 
-    def create_vector_store(self, storage_path: str) -> Dict[str, Any]:
+    def create_vector_store(self, storage_path: str) -> dict[str, Any]:
         """
         Create an empty vector store at the specified path.
 
@@ -36,7 +36,7 @@ class VectorStoreClient:
             print(f"Error creating vector store: {e}")
             return {"error": str(e)}
 
-    def process_document(self, text: str, source_filename: str, storage_path: str) -> Dict[str, Any]:
+    def process_document(self, text: str, source_filename: str, storage_path: str) -> dict[str, Any]:
         """
         Process a document: split, embed, and store it in the vector store.
 
@@ -63,7 +63,7 @@ class VectorStoreClient:
             print(f"Error processing document: {e}")
             return {"error": str(e)}
 
-    def search_document_content(self, question: str, document_name: str) -> Optional[str]:
+    def search_document_content(self, question: str, document_name: str) -> str | None:
         """
         Search for content in a specific document.
 
@@ -88,7 +88,13 @@ class VectorStoreClient:
             print(f"Error searching document content: {e}")
             return None
 
-    def search_document_content_with_path(self, question: str, document_name: str, storage_path: str, k: int = 3) -> Optional[List[Dict[str, Any]]]:
+    def search_document_content_with_path(
+        self,
+        question: str,
+        document_name: str,
+        storage_path: str,
+        k: int = 3
+    ) -> list[dict[str, Any]] | None:
         """
         Search for content in a specific document with a specified storage path.
 
@@ -117,7 +123,7 @@ class VectorStoreClient:
             print(f"Error searching document content: {e}")
             return None
 
-    def delete_document_from_store(self, document_name: str, storage_path: str) -> Dict[str, Any]:
+    def delete_document_from_store(self, document_name: str, storage_path: str) -> dict[str, Any]:
         """
         Delete a document from the vector store.
 

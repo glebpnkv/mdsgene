@@ -1,11 +1,12 @@
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 
 from typing import Annotated
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 from mdsgene.agents.base_agent import BaseAgent
+
 
 # Define the state for our LangGraph
 class State(TypedDict):
@@ -13,12 +14,13 @@ class State(TypedDict):
     patient_identifiers: List[Dict[str, Optional[str]]]
     messages: Annotated[list, add_messages]
 
+
 class PatientIdentifiersAgent(BaseAgent[State]):
     """Agent for extracting patient identifiers from PDFs."""
 
     def __init__(self, pmid: str = None):
         """
-        Initialize the patient identifiers agent.
+        Initialize the patient identifier agent.
 
         Args:
             pmid: PMID of the document (optional)
@@ -29,7 +31,6 @@ class PatientIdentifiersAgent(BaseAgent[State]):
     def extract_patient_identifiers(self, state: State) -> State:
         """Extract patient identifiers from PDF using Gemini with caching."""
         pdf_filepath = state["pdf_filepath"]
-        pdf_name = Path(pdf_filepath).name
 
         patient_identifiers = []
         cache = self.load_cache()
@@ -47,26 +48,26 @@ class PatientIdentifiersAgent(BaseAgent[State]):
                     print(f"  Successfully loaded {len(patient_identifiers)} identifiers from cache.")
                     loaded_from_cache = True
                 else:
-                    print("  WARNING: Cached data for patient identifiers is not a list. Re-fetching.")
+                    print("WARNING: Cached data for patient identifiers is not a list. Re-fetching.")
             except Exception:
-                print("  ERROR: Failed to parse cached patient identifiers. Re-fetching.")
+                print("ERROR: Failed to parse cached patient identifiers. Re-fetching.")
 
         if not loaded_from_cache:
             print("  Cache MISS or invalid cache data. Querying AI Processor Service for patient identifiers...")
             try:
                 fetched_identifiers = self.ai_processor_client.get_patient_identifiers(pdf_filepath)
-                print(f"  Successfully fetched {len(fetched_identifiers)} identifiers via Gemini.")
+                print(f"Successfully fetched {len(fetched_identifiers)} identifiers via Gemini.")
 
                 try:
                     cache[self.patient_cache_key] = fetched_identifiers
                     self.save_cache(cache)
-                    print("  Stored fetched patient identifiers in cache.")
+                    print("Stored fetched patient identifiers in cache.")
                     patient_identifiers = fetched_identifiers
                 except TypeError as json_err:
-                    print(f"  ERROR: Could not serialize fetched patient identifiers to JSON: {json_err}. Not caching.")
+                    print(f"ERROR: Could not serialize fetched patient identifiers to JSON: {json_err}. Not caching.")
                     patient_identifiers = fetched_identifiers
                 except Exception as cache_err:
-                    print(f"  ERROR: Could not save patient identifiers to cache: {cache_err}")
+                    print(f"ERROR: Could not save patient identifiers to cache: {cache_err}")
                     patient_identifiers = fetched_identifiers
 
             except Exception as e:
@@ -148,6 +149,7 @@ def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
