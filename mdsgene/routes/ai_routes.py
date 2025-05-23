@@ -10,11 +10,13 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from pathlib import Path
 from uuid import uuid4
 from fastapi.responses import FileResponse
+from datetime import datetime
 
 from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
 from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
 from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
 from mdsgene.agents.base_agent import CACHE_DIR
+from mdsgene.workflows.pdf_processing import process_pdf_file
 from fastapi import Body
 from typing import Any
 from mdsgene.document_processor import DocumentProcessor
@@ -1184,7 +1186,7 @@ async def delete_patient_identifier(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error deleting patient identifier: {str(e)}")
 
-@router.get("/file/mapping_data")
+@router.get("/gene/mapping_data")
 async def get_mapping_data():
     """
     Retrieve the content of the mapping_data_all.json file.
@@ -1621,3 +1623,426 @@ async def delete_document_and_cache(pdf_filename: str, pmid: str):
         return {"message": f"Документ {pdf_filename} и связанные данные успешно удалены."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+import numpy as np
+from typing import List, Dict, Any, Optional
+from pathlib import Path
+from fastapi import HTTPException
+from qc.api.gene.utils import EXPECTED_HEADERS
+from qc.config import properties_directory, excel_folder
+from mdsgene.custom_processors import CustomProcessors
+
+# Ensure these directories exist
+EXCEL_FOLDER = Path(excel_folder)
+PROPERTIES_DIRECTORY = Path(properties_directory)
+EXCEL_FOLDER.mkdir(exist_ok=True)
+PROPERTIES_DIRECTORY.mkdir(exist_ok=True)
+
+# Helper to find excel file
+def find_excel_file_for_gene_disease(gene_name: str, disease_abbrev: str, excel_dir: Path) -> Optional[Path]:
+    pattern = f"{gene_name}-{disease_abbrev}"
+    for f in excel_dir.glob(f"{pattern}*.xlsx"):
+        return f  # Return the first match
+    return None
+
+# Helper to prepare a row for the Excel sheet
+def prepare_excel_row(patient_data: Dict[str, Any], expected_headers: set) -> Dict[str, Any]:
+    row_data = {}
+    # Map input keys to expected headers (case-insensitive for input keys)
+    expected_headers_lower_map = {h.lower(): h for h in expected_headers}
+
+    for key, value in patient_data.items():
+        key_lower = key.lower()
+        if key_lower in expected_headers_lower_map:
+            row_data[expected_headers_lower_map[key_lower]] = value
+        elif "_sympt" in key_lower or "_hp:" in key_lower:  # Keep symptom columns as is
+            row_data[key] = value
+
+    # Ensure all expected headers are present, fill with -99 if missing
+    for header in expected_headers:
+        if header not in row_data:
+            row_data[header] = -99  # Or None / np.nan depending on type, but task specifies -99
+    return row_data
+
+# Helper to update or create symptom category JSON
+def update_symptom_json(gene_name: str, disease_abbrev: str, patient_data: Dict[str, Any], properties_dir: Path):
+    symptom_file_name = f"symptom_categories_{disease_abbrev}_{gene_name}.json"
+    symptom_file_path = properties_dir / symptom_file_name
+
+    current_symptoms_data = {}
+    if symptom_file_path.exists():
+        try:
+            with open(symptom_file_path, 'r', encoding='utf-8') as f:
+                current_symptoms_data = json.load(f)
+        except json.JSONDecodeError:
+            print(f"Warning: Symptom file {symptom_file_path} is corrupted. Will overwrite.")
+            current_symptoms_data = {
+                "Motor signs and symptoms": {},
+                "Non-motor signs and symptoms": {},
+                "Unknown": {}
+            }  # Default structure
+    else:
+        current_symptoms_data = {
+            "Motor signs and symptoms": {},
+            "Non-motor signs and symptoms": {},
+            "Unknown": {}
+        }  # Default structure
+
+    # Ensure all categories exist
+    for category in ["Motor signs and symptoms", "Non-motor signs and symptoms", "Unknown"]:
+        if category not in current_symptoms_data:
+            current_symptoms_data[category] = {}
+
+    # Extract symptoms from patient_data
+    motor_symptoms = {}
+    non_motor_symptoms = {}
+    unknown_symptoms = {}
+
+    # Process motor_symptoms and non_motor_symptoms fields
+    for symptom_type in ['motor_symptoms', 'non_motor_symptoms']:
+        symptoms_data = patient_data.get(symptom_type, '')
+        if symptoms_data and symptoms_data != '-99_NO_ANSWER':
+            symptoms = symptoms_data.split(';')
+            for symptom in symptoms:
+                if ':' in symptom:
+                    symptom_name, symptom_value = symptom.strip().split(':', 1)
+                    col_name = f"{symptom_name.strip().lower().replace(' ', '_')}_sympt"
+
+                    # Determine category based on symptom_type
+                    if symptom_type == 'motor_symptoms':
+                        if col_name not in current_symptoms_data["Motor signs and symptoms"]:
+                            motor_symptoms[col_name] = symptom_name.strip()
+                    else:  # non_motor_symptoms
+                        if col_name not in current_symptoms_data["Non-motor signs and symptoms"]:
+                            non_motor_symptoms[col_name] = symptom_name.strip()
+
+    # Process other symptom fields in patient_data
+    for key, value in patient_data.items():
+        key_lower = key.lower()
+        if ("_sympt" in key_lower or "_hp:" in key_lower) and key not in motor_symptoms and key not in non_motor_symptoms:
+            # Check if it's already in any category
+            found = False
+            for category in ["Motor signs and symptoms", "Non-motor signs and symptoms"]:
+                if key in current_symptoms_data[category]:
+                    found = True
+                    break
+
+            if not found:
+                # Try to categorize based on key name
+                if any(motor_term in key_lower for motor_term in ["motor", "tremor", "rigid", "bradykinesia", "postural", "gait", "dyskinesia", "dystonia"]):
+                    if key not in current_symptoms_data["Motor signs and symptoms"]:
+                        motor_symptoms[key] = key
+                elif any(non_motor_term in key_lower for non_motor_term in ["cognitive", "depression", "anxiety", "sleep", "psychotic", "autonomic", "olfaction"]):
+                    if key not in current_symptoms_data["Non-motor signs and symptoms"]:
+                        non_motor_symptoms[key] = key
+                else:
+                    if key not in current_symptoms_data["Unknown"]:
+                        unknown_symptoms[key] = key
+
+    # Update the categories with new symptoms
+    if motor_symptoms:
+        current_symptoms_data["Motor signs and symptoms"].update(motor_symptoms)
+    if non_motor_symptoms:
+        current_symptoms_data["Non-motor signs and symptoms"].update(non_motor_symptoms)
+    if unknown_symptoms:
+        current_symptoms_data["Unknown"].update(unknown_symptoms)
+
+    # Save the updated data
+    if motor_symptoms or non_motor_symptoms or unknown_symptoms:
+        try:
+            with open(symptom_file_path, 'w', encoding='utf-8') as f:
+                json.dump(current_symptoms_data, f, indent=2, ensure_ascii=False)
+            print(f"Updated/Created symptom file: {symptom_file_path}")
+        except Exception as e:
+            print(f"Error writing symptom file {symptom_file_path}: {e}")
+
+
+@router.post("/file/process_to_excel")
+async def process_to_excel(data: List[Dict[str, Any]] = Body(...)):
+    if not data:
+        raise HTTPException(status_code=400, detail="No data provided")
+
+    # Load mapping data for custom processors
+    mapping_file_path = os.path.join(".questions", "mapping_data.json")
+
+    if not os.path.exists(mapping_file_path):
+        raise HTTPException(status_code=404, detail="Mapping data file not found")
+
+    with open(mapping_file_path, 'r', encoding='utf-8') as file:
+        mapping_data = json.load(file)
+
+    # Create a dictionary of field to custom processor mapping
+    field_processors = {}
+    for item in mapping_data:
+        if "field" in item and "custom_processor" in item and item["custom_processor"]:
+            field_processors[item["field"]] = item["custom_processor"]
+
+    processed_rows = []
+
+    #remove from data column "Author_year" because there is another column with the name Author, year
+    for patient in data:
+        if 'Author_year' in patient:
+            del patient['Author_year']
+
+
+    # Обработка каждой строки отдельно
+    for patient in data:
+        row = {key: '-99' for key in EXPECTED_HEADERS}
+
+        # Check if the processor method exists in CustomProcessors class
+        if hasattr(CustomProcessors, 'disease_abbrev'):
+            # Call the processor method to process the value
+            processor_method = getattr(CustomProcessors, 'disease_abbrev')
+            update_symptom_json(patient['gene1'], processor_method(patient['disease_abbrev']), patient, PROPERTIES_DIRECTORY)
+
+        row['PMID'] = patient.get('PMID', '-99')
+        row['family_ID'] = patient.get('Family_ID', '-99')
+        row['individual_ID'] = patient.get('individual_ID', '-99')
+
+        # Динамическое заполнение всех полей из patient
+        for field, value in patient.items():
+            if field in EXPECTED_HEADERS:
+                # Check if this field has a custom processor
+                if field in field_processors:
+                    processor_name = field_processors[field]
+                    # Check if the processor method exists in CustomProcessors class
+                    if hasattr(CustomProcessors, processor_name):
+                        # Call the processor method to process the value
+                        processor_method = getattr(CustomProcessors, processor_name)
+                        row[field] = processor_method(value)
+                    else:
+                        # If processor doesn't exist, use the value as is
+                        row[field] = value
+                else:
+                    # No custom processor, use the value as is
+                    row[field] = value
+
+        # Обработка motor_symptoms и non_motor_symptoms
+        for symptom_type in ['motor_symptoms', 'non_motor_symptoms']:
+            symptoms_data = patient.get(symptom_type, '')
+            if symptoms_data and symptoms_data != '-99_NO_ANSWER':
+                symptoms = symptoms_data.split(';')
+                for symptom in symptoms:
+                    if ':' in symptom:
+                        symptom_name, symptom_value = symptom.strip().split(':', 1)
+                        col_name = f"{symptom_name.strip().lower().replace(' ', '_')}_sympt"
+                        row[col_name] = symptom_value.strip()
+
+        # Mark row as generated by AI
+        row['extracted_by_ai'] = 'yes'
+
+        processed_rows.append(row)
+
+    # Сохранение данных в Excel и JSON с симптомами
+    try:
+        df_new_rows = pd.DataFrame(processed_rows)
+
+        # Используем данные из первой строки для имени файла
+        gene_name = processed_rows[0].get('gene1', 'gene_unknown')
+        disease_abbrev = processed_rows[0].get('disease_abbrev', 'disease_unknown')
+
+        # add timestamp to filename and build prefix without timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_prefix = f"{gene_name}-{disease_abbrev}_auto_created"
+        excel_file_name = f"{file_prefix}-{timestamp}.xlsx"
+        excel_path = EXCEL_FOLDER / excel_file_name
+
+        # Remove any existing Excel files with the same prefix
+        for existing_file in EXCEL_FOLDER.glob(f"{file_prefix}-*.xlsx"):
+            try:
+                existing_file.unlink()
+            except Exception as e:
+                print(f"Error removing existing file {existing_file}: {e}")
+
+        # Save the new data directly
+        df_new_rows.to_excel(excel_path, index=False)
+
+        # Generate gene URLs
+        gene_urls = generate_gene_url(processed_rows)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error when saving data:{e}")
+
+    # Return the response with gene URLs included
+    return {
+        "message": "Data successfully processed and saved to MDSGene.",
+        "gene_urls": gene_urls
+    }
+
+
+def generate_gene_url(data):
+    """
+    Generate URLs for exported gene data pointing to the
+    `/patients_for_publication` endpoint.
+
+    Args:
+        data: A list of dictionaries containing patient data with gene and disease information
+
+    Returns:
+        dict or str: A dictionary of generated URLs if multiple unique gene-disease pairs,
+                    or a single URL string if only one pair, or an error message
+    """
+    if not data:
+        return "Error: No data provided"
+
+    try:
+        # Get base_url from environment variable, with a fallback value
+        base_url = os.environ.get("MDSGENE_BASE_URL", "http://localhost")
+
+        gene_disease_pairs = {}
+
+        # Extract gene-disease-pmid combinations from the data
+        for patient in data:
+            gene = patient.get('gene1', '')
+            disease = patient.get('disease_abbrev', '')
+            pmid = patient.get('PMID', '')
+
+            if not gene or not disease or not pmid:
+                continue
+
+            # Clean up the values
+            gene = gene.strip()
+            disease = disease.strip()
+            pmid = str(pmid).strip()
+
+            # Create a unique key for this combination
+            pair_key = f"{gene}-{disease}-{pmid}"
+
+            # Create URL for this combination pointing to patients_for_publication
+            gene_disease_pairs[pair_key] = (
+                f"{base_url}genes/{disease}-{gene}/{pmid}"
+            )
+
+        # If no valid pairs found
+        if not gene_disease_pairs:
+            return "Error: No valid gene-disease pairs found in the data"
+
+        # If only one pair, return just the URL
+        if len(gene_disease_pairs) == 1:
+            return list(gene_disease_pairs.values())[0]
+
+        # If multiple pairs, return the dictionary
+        return gene_disease_pairs
+
+    except Exception as e:
+        return f"Error generating URL: {str(e)}"
+
+
+@router.get("/file/aggregated_document_data")
+async def get_aggregated_document_data(filename: str = Query(..., description="PDF filename to process")):
+    """
+    Process a PDF file and return aggregated data extracted by multiple agents.
+
+    This endpoint:
+    1. Finds the PDF file in TEMP_UPLOAD_DIR
+    2. Uses process_pdf_file function which:
+       - Uses PublicationDetailsAgent to extract publication details and PMID (using pmid_cache.json)
+       - Uses PatientIdentifiersAgent to extract patient identifiers (using patient_cache.json)
+       - Uses QuestionsProcessingAgent to process questions for each patient
+    3. Returns all results in a structured JSON response
+
+    Args:
+        filename: Name of the PDF file to process (must exist in TEMP_UPLOAD_DIR)
+
+    Returns:
+        JSON with publication details, PMID, patient identifiers, and processed questions
+    """
+    try:
+        # Construct the full path to the PDF file
+        file_path = os.path.join(TEMP_UPLOAD_DIR, filename)
+
+        # Check if the file exists
+        if not os.path.exists(file_path):
+            raise HTTPException(
+                status_code=404, 
+                detail=f"File '{filename}' not found in upload directory"
+            )
+
+        # Process the PDF file using the existing process_pdf_file function
+        results = process_pdf_file(file_path)
+
+        return results
+
+    except ValueError as e:
+        # Handle validation errors
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Handle other errors
+        print(f"Error processing PDF file: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error processing PDF file: {str(e)}")
+
+
+def find_most_recent_file(directory: str) -> Optional[str]:
+    """
+    Find the most recent file in the specified directory.
+
+    Args:
+        directory: Path to the directory to search
+
+    Returns:
+        Full path to the most recent file, or None if no files found
+    """
+    try:
+        # Ensure the directory exists
+        if not os.path.exists(directory):
+            print(f"Directory {directory} does not exist")
+            return None
+
+        # Get all files in the directory (not subdirectories)
+        files = [os.path.join(directory, f) for f in os.listdir(directory) 
+                if os.path.isfile(os.path.join(directory, f))]
+
+        if not files:
+            print(f"No files found in {directory}")
+            return None
+
+        # Sort files by modification time (most recent first)
+        files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+
+        # Return the most recent file
+        return files[0]
+
+    except Exception as e:
+        print(f"Error finding most recent file: {e}")
+        return None
+
+
+@router.get("/file/latest")
+async def get_latest_file():
+    """
+    Returns the most recent file from the upload directory.
+
+    This endpoint:
+    1. Finds the most recent file in TEMP_UPLOAD_DIR
+    2. Returns the file to the client
+
+    Returns:
+        The most recent file as a download
+    """
+    try:
+        # Find the most recent file
+        latest_file_path = find_most_recent_file(CACHE_DIR)
+
+        if not latest_file_path:
+            raise HTTPException(
+                status_code=404,
+                detail="No files found in upload directory"
+            )
+
+        # Return the file
+        return FileResponse(
+            path=latest_file_path,
+            filename=os.path.basename(latest_file_path),
+            media_type="application/octet-stream"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error retrieving latest file: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error retrieving latest file: {e}")

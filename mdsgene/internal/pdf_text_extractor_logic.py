@@ -2,43 +2,12 @@ import sys
 from pathlib import Path
 from pypdf import PdfReader
 import re
-import tabula
-import pdfplumber
 
 
 class PdfTextExtractorLogic:
     """Extracts text content from a PDF file using pypdf with enhanced table handling."""
 
     # pip install tabula-py pdfplumber
-
-    @staticmethod
-    def extract_tables_with_tabula(pdf_path):
-        # Use tabula for tables
-        tables = tabula.read_pdf(pdf_path, pages='all', multiple_tables=True)
-        return tables
-
-    @staticmethod
-    def extract_text_with_pdfplumber(pdf_path):
-        with pdfplumber.open(pdf_path) as pdf:
-            text = ""
-            for page in pdf.pages:
-                text += page.extract_text() + "\n"
-            return text
-
-    @staticmethod
-    def extract_comprehensive(pdf_path):
-        # Get tables as structured data
-        tables = PdfTextExtractorLogic.extract_tables_with_tabula(pdf_path)
-
-        # Get full text for context
-        full_text = PdfTextExtractorLogic.extract_text_with_pdfplumber(pdf_path)
-
-        # Process and combine
-        result = {
-            "text": full_text,
-            "tables": tables
-        }
-        return result
 
     def extract_text(self, pdf_filepath: str | Path) -> str | None:
         """

@@ -6,6 +6,7 @@ from typing import Annotated
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 from mdsgene.agents.base_agent import BaseAgent
+from mdsgene.pdf_uri_utils import resolve_pdf_uri
 
 # Define the state for our LangGraph
 class State(TypedDict):
@@ -54,7 +55,11 @@ class PatientIdentifiersAgent(BaseAgent[State]):
         if not loaded_from_cache:
             print("  Cache MISS or invalid cache data. Querying AI Processor Service for patient identifiers...")
             try:
-                fetched_identifiers = self.ai_processor_client.get_patient_identifiers(pdf_filepath)
+                pdf_uri = resolve_pdf_uri(Path(pdf_filepath))
+                if pdf_uri:
+                    fetched_identifiers = self.ai_processor_client.get_patient_identifiers(pdf_uri=pdf_uri)
+                else:
+                    fetched_identifiers = self.ai_processor_client.get_patient_identifiers(pdf_filepath)
                 print(f"  Successfully fetched {len(fetched_identifiers)} identifiers via Gemini.")
 
                 try:

@@ -8,6 +8,7 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 from mdsgene.pmid_extractor import PmidExtractor
 from mdsgene.agents.base_agent import BaseAgent
+from mdsgene.pdf_uri_utils import resolve_pdf_uri
 
 # Define the state for our LangGraph
 class State(TypedDict):
@@ -59,7 +60,11 @@ class PublicationDetailsAgent(BaseAgent[State]):
 
         # Not in cache, extract using AI Processor Client
         try:
-            pub_details = self.ai_processor_client.extract_publication_details(pdf_filepath)
+            pdf_uri = resolve_pdf_uri(Path(pdf_filepath))
+            if pdf_uri:
+                pub_details = self.ai_processor_client.extract_publication_details(pdf_uri=pdf_uri)
+            else:
+                pub_details = self.ai_processor_client.extract_publication_details(pdf_filepath)
 
             # Extract PMID using PmidExtractor
             pmid = PmidExtractor.get_pmid(

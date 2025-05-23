@@ -17,7 +17,8 @@ app = FastAPI(
 
 # Models for request/response
 class QuestionRequest(BaseModel):
-    pdf_filepath: str
+    pdf_filepath: Optional[str] = None
+    pdf_uri: Optional[str] = None
     question: str
     processor_name: str = "gemini"  # Default to gemini
 
@@ -25,13 +26,16 @@ class FormatRequest(BaseModel):
     raw_answer: str
     strategy: str
     processor_name: str = "gemini"  # Default to gemini
+    pmid: Optional[str] = None
 
 class PatientIdentifiersRequest(BaseModel):
-    pdf_filepath: str
+    pdf_filepath: Optional[str] = None
+    pdf_uri: Optional[str] = None
     processor_name: str = "gemini"  # Default to gemini
 
 class PublicationDetailsRequest(BaseModel):
-    pdf_filepath: str
+    pdf_filepath: Optional[str] = None
+    pdf_uri: Optional[str] = None
     processor_name: str = "gemini"  # Default to gemini
 
 # Processor registry
@@ -40,13 +44,14 @@ PROCESSORS = {
 }
 
 # Helper function to initialize processor
-def get_processor(processor_name: str, pdf_filepath: str):
+def get_processor(processor_name: str, pdf_filepath: Optional[str], pdf_uri: Optional[str]):
     """
     Initialize and return the requested processor.
 
     Args:
         processor_name: Name of the processor to use
-        pdf_filepath: Path to the PDF file
+        pdf_filepath: Optional path to the PDF file
+        pdf_uri: Optional Gemini URI
 
     Returns:
         Initialized processor instance
@@ -56,19 +61,19 @@ def get_processor(processor_name: str, pdf_filepath: str):
     """
     if processor_name not in PROCESSORS:
         raise HTTPException(status_code=404, detail=f"Processor '{processor_name}' not found")
+    if not pdf_uri and not pdf_filepath:
+        raise HTTPException(status_code=400, detail="Either pdf_uri or pdf_filepath must be provided")
 
     try:
-        # Convert to Path object
-        pdf_path = Path(pdf_filepath)
-
-        # Check if file exists
-        if not pdf_path.exists():
+        pdf_path = Path(pdf_filepath) if pdf_filepath else None
+        if pdf_path and not pdf_path.exists():
             raise HTTPException(status_code=404, detail=f"PDF file not found at {pdf_filepath}")
 
-        # Initialize processor
         processor_class = PROCESSORS[processor_name]
-        processor = processor_class(pdf_filepath=pdf_path)
+        processor = processor_class(pdf_filepath=pdf_path, pdf_uri=pdf_uri)
         return processor
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to initialize processor: {str(e)}")
 
@@ -85,7 +90,7 @@ async def answer_question(request: QuestionRequest):
         Dictionary with answer and context
     """
     try:
-        processor = get_processor(request.processor_name, request.pdf_filepath)
+        processor = get_processor(request.processor_name, request.pdf_filepath, request.pdf_uri)
         result = processor.answer_question(request.question)
 
         if result is None:
@@ -104,7 +109,7 @@ async def format_answer(request: FormatRequest):
     Format a raw answer according to a specific strategy using GeminiTextProcessor.
 
     Args:
-        request: FormatRequest object containing raw_answer, strategy, and processor_name
+        request: FormatRequest object containing raw_answer, strategy, processor_name and optional pmid
 
     Returns:
         Dictionary with formatted answer and context
@@ -115,7 +120,7 @@ async def format_answer(request: FormatRequest):
         if request.processor_name == "gemini":
             # Initialize the text processor (no PDF needed)
             # It will read API key from environment internally
-            text_processor = GeminiTextProcessor()
+            text_processor = GeminiTextProcessor(pmid=request.pmid)
         else:
              raise HTTPException(status_code=404, detail=f"Text processor '{request.processor_name}' not found for formatting")
 
@@ -155,7 +160,7 @@ async def get_patient_identifiers(request: PatientIdentifiersRequest):
         Dictionary with list of patient identifiers
     """
     try:
-        processor = get_processor(request.processor_name, request.pdf_filepath)
+        processor = get_processor(request.processor_name, request.pdf_filepath, request.pdf_uri)
         patient_identifiers = processor.get_patient_identifiers()
 
         return {
@@ -180,7 +185,7 @@ async def extract_publication_details(request: PublicationDetailsRequest):
         Dictionary with publication details
     """
     try:
-        processor = get_processor(request.processor_name, request.pdf_filepath)
+        processor = get_processor(request.processor_name, request.pdf_filepath, request.pdf_uri)
         publication_details = processor.extract_publication_details()
 
         return {
