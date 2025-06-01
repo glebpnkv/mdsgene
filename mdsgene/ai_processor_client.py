@@ -82,7 +82,8 @@ class AIProcessorClient:
         self,
         raw_answer: str,
         strategy: str,
-        processor_name: str = "gemini"
+        processor_name: str = "gemini",
+        pmid: str | None = None,
     ) -> tuple[str, str] | None:
         """
         Format a raw answer according to a specific strategy.
@@ -91,16 +92,19 @@ class AIProcessorClient:
             raw_answer: Raw answer to format
             strategy: Formatting strategy
             processor_name: Name of the processor to use
-            
+            pmid: PMID for organizing formatted answer cache
+
         Returns:
             Tuple of (formatted_answer, context) if successful, None otherwise
         """
         data = {
             "raw_answer": raw_answer,
             "strategy": strategy,
-            "processor_name": processor_name
+            "processor_name": processor_name,
         }
-        
+        if pmid:
+            data["pmid"] = pmid
+
         try:
             response = self._make_request("format_answer", data)
             
@@ -116,22 +120,25 @@ class AIProcessorClient:
     def get_patient_identifiers(
         self,
         pdf_filepath: str,
-        processor_name: str = "gemini"
+        processor_name: str = "gemini",
+        pdf_uri: str | None = None,
     ) -> tuple[str, str] | None:
         """
         Extract patient identifiers from a PDF file.
         
         Args:
-            pdf_filepath: Path to the PDF file
-            processor_name: Name of the processor to use
+            pdf_filepath: Local path to the PDF file.
+            processor_name: Name of the processor to use.
+            pdf_uri: Pre-uploaded Gemini URI.
             
         Returns:
             List of patient identifiers (each a dict with 'patient' and 'family' keys)
         """
-        data = {
-            "pdf_filepath": str(pdf_filepath),
-            "processor_name": processor_name
-        }
+        data = {"processor_name": processor_name}
+        if pdf_uri:
+            data["pdf_uri"] = pdf_uri
+        if pdf_filepath:
+            data["pdf_filepath"] = str(pdf_filepath)
         
         try:
             response = self._make_request("get_patient_identifiers", data)
@@ -148,22 +155,25 @@ class AIProcessorClient:
     def extract_publication_details(
         self,
         pdf_filepath: str,
-        processor_name: str = "gemini"
+        processor_name: str = "gemini",
+        pdf_uri: str | None = None,
     ) -> tuple[str, str] | None:
         """
         Extract publication details from a PDF file.
         
         Args:
-            pdf_filepath: Path to the PDF file
-            processor_name: Name of the processor to use
+            pdf_filepath: Local path to the PDF file.
+            processor_name: Name of the processor to use.
+            pdf_uri: Pre-uploaded Gemini URI.
             
         Returns:
             Dictionary with publication details
         """
-        data = {
-            "pdf_filepath": str(pdf_filepath),
-            "processor_name": processor_name
-        }
+        data = {"processor_name": processor_name}
+        if pdf_uri:
+            data["pdf_uri"] = pdf_uri
+        if pdf_filepath:
+            data["pdf_filepath"] = str(pdf_filepath)
         
         try:
             response = self._make_request("extract_publication_details", data)

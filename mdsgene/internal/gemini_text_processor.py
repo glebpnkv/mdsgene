@@ -1,8 +1,11 @@
 import os
 import sys
 import time
+import json
 import traceback
+from pathlib import Path
 from typing import Any
+from mdsgene.cache_utils import save_formatted_result
 
 # Use google.generativeai for Gemini interaction
 from google.api_core import exceptions as google_exceptions
@@ -22,7 +25,12 @@ DEFAULT_GENERATION_CONFIG = genai.types.GenerationConfig(
 class GeminiTextProcessor:
     """Handles general text interactions with the Gemini API (e.g., formatting)."""
 
-    def __init__(self, api_key: str | None = None, model_name: str = DEFAULT_GEMINI_MODEL):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model_name: str = DEFAULT_GEMINI_MODEL,
+        pmid: Optional[str] = None
+    ):
         """
         Initializes the Gemini client for text operations.
 
@@ -40,9 +48,29 @@ class GeminiTextProcessor:
             self.safety_settings = DEFAULT_SAFETY_SETTINGS
             self.generation_config = DEFAULT_GENERATION_CONFIG
             print(f"GeminiTextProcessor client initialized for model '{model_name}'.")
+
+            self.pmid = pmid
+            cache_dir = Path("cache") / pmid if pmid else Path("cache")
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            self._format_cache_path = cache_dir / "formatted_answer_cache.json"
+            self._format_cache: Dict[str, Dict[str, str]] = {}
+
         except Exception as e:
             print(f"Error initializing GeminiTextProcessor client: {e}", file=sys.stderr)
             raise
+
+    def load_from_cache(self, cache_id: str) -> dict[str, str] | None:
+        """Load a cached formatted answer by id."""
+        return self._format_cache.get(cache_id)
+
+    def save_to_cache(self, cache_id: str, raw_answer: str, strategy: str) -> None:
+        """Save a formatted answer to cache."""
+        self._format_cache[cache_id] = {"raw_answer": raw_answer, "strategy": strategy}
+        try:
+            with open(self._format_cache_path, "w", encoding="utf-8") as f:
+                json.dump(self._format_cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"ERROR saving format cache: {e}")
 
     def _make_gemini_request(self, prompt_parts: list[Any], task_description: str) -> str | None:
         """Makes a request to the Gemini API using the client with retry logic (Text only)."""
@@ -124,6 +152,8 @@ class GeminiTextProcessor:
              print(f"Raw answer indicates error ('{raw_answer[:50]}...'). Returning -99.")
              return "-99", None
 
+
+
         formatting_prompt = f"""
         Given the following raw text extracted from a document and a desired formatting strategy, reformat the text.
         
@@ -169,6 +199,10 @@ class GeminiTextProcessor:
             # Return the original raw_answer as context even on failure
             return "-99", raw_answer
 
+        if not formatted_answer or not formatted_answer.strip():
+            print("ERROR: Empty string returned from Gemini.")
+            return "-99", raw_answer
+
         # Post-processing cleanup (same as before)
         formatted_answer = formatted_answer.strip()
         if formatted_answer.startswith('"') and formatted_answer.endswith('"') and len(formatted_answer) > 1:
@@ -186,6 +220,27 @@ class GeminiTextProcessor:
              print(f"  Formatted answer resulted in an 'unknown' value ('{formatted_answer}'). Returning -99.")
              # Return the original raw_answer as context
              return "-99", raw_answer
+
+        if self.pmid:
+            text_for_parse = formatted_answer.strip()
+            if text_for_parse.startswith("```"):
+                text_for_parse = re.sub(r"^```(?:json)?\s*", "", text_for_parse)
+                text_for_parse = re.sub(r"\s*```$", "", text_for_parse).strip()
+            try:
+                parsed_json = json.loads(text_for_parse)
+            except Exception:
+                parsed_json = None
+
+            if isinstance(parsed_json, dict):
+                save_formatted_result(
+                    self.pmid,
+                    formatting_prompt,
+                    raw_answer,
+                    strategy,
+                    parsed_json,
+                )
+            else:
+                print("[Cache] Formatted result is not JSON. Skipping cache save.")
 
         print(f"  Formatted result: '{formatted_answer}'")
         # Return the formatted answer and the original raw_answer as context

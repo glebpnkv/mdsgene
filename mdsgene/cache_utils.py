@@ -1,6 +1,7 @@
 # cache_utils.py
 import json
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 
@@ -80,3 +81,85 @@ def delete_document_and_all_related_data(
         print(f"[Cleanup] Error deleting document from vector store: {response['error']}")
     else:
         print(f"[Cleanup] {response['message']}")
+
+
+def load_formatted_result(
+    pmid: str, expected_patient_ids: Optional[list[str]] = None
+) -> Optional[Dict[str, Any]]:
+    """Load formatted patient results for a specific PMID if present.
+
+    Args:
+        pmid: Document PMID.
+        expected_patient_ids: Optional list of patient IDs expected in the
+            results. Used to log cache coverage.
+
+    Returns:
+        Cached formatted result dictionary or ``None`` if not available or
+        incomplete.
+    """
+    path = Path("cache") / pmid / "formatted_answer_cache.json"
+    print(f"[Cache] Looking for cache at: {path}")
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                formatted = data.get("formatted", {})
+                if formatted.get("completed") and "result" in formatted:
+                    cached_result = formatted["result"]
+                    if expected_patient_ids:
+                        missing = [pid for pid in expected_patient_ids if pid not in cached_result]
+                        if missing:
+                            print(
+                                f"[Cache] Partial cache hit. Missing {len(missing)} of {len(expected_patient_ids)} patients."
+                            )
+                        else:
+                            print("[Cache] Full cache hit.")
+                    return cached_result
+                else:
+                    print("[Cache] Cache found but not marked as completed or missing result.")
+        except Exception as e:
+            print(f"[Cache] ERROR reading formatted cache: {e}")
+    else:
+        print("[Cache] No cache file found.")
+    return None
+
+
+def save_formatted_result(
+    pmid: str,
+    prompt: str,
+    raw_answer: str,
+    strategy: str,
+    formatted_result: Dict[str, Any],
+) -> None:
+    """Save raw and formatted patient results for a PMID.
+
+    This appends new patient results to any existing cache for the PMID.
+    """
+    path = Path("cache") / pmid / "formatted_answer_cache.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data: Dict[str, Any] = {}
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+
+    existing = data.get("formatted", {}).get("result", {})
+    existing.update(formatted_result)
+
+    data["raw"] = {
+        "question_prompt": prompt,
+        "answer": raw_answer,
+        "timestamp": datetime.utcnow().isoformat(),
+        "completed": True,
+    }
+    data["formatted"] = {
+        "strategy": strategy,
+        "result": existing,
+        "timestamp": datetime.utcnow().isoformat(),
+        "completed": True,
+    }
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import sys
+import re
 from pathlib import Path
 
 from typing import Annotated
@@ -8,6 +9,9 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 from mdsgene.agents.base_agent import BaseAgent, CACHE_DIR
 from mdsgene.mapping_item import MappingItem, QuestionInfo
+from mdsgene.document_processor import DocumentProcessor
+from mdsgene.cache_utils import load_formatted_result, save_formatted_result
+from mdsgene.pdf_uri_utils import resolve_pdf_uri
 
 
 # Define the state for our LangGraph
@@ -360,9 +364,10 @@ class QuestionsProcessingAgent(BaseAgent[State]):
         }
 
     def process_patient_questions(self, state: State) -> State:
-        """Process questions for each patient and get answers."""
+        """Process questions for all patients using a single Gemini request."""
         pdf_filepath = state["pdf_filepath"]
         patient_questions = state["patient_questions"]
+        pdf_uri = resolve_pdf_uri(Path(pdf_filepath))
 
         if not patient_questions:
             error_msg = "ERROR: No patient question sets generated. Cannot process patients."
@@ -374,143 +379,246 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                 ]
             }
 
-        # Process each patient's questions
-        all_patient_data_rows = []
         print(f"\nProcessing {len(patient_questions)} identified patient sets...")
 
-        patient_num = 0
-        for patient_question_set in patient_questions:
-            patient_num += 1
-            if not patient_question_set:
-                print(f"\n=== Skipping Patient Set {patient_num} (Empty Question Set) ===")
-                continue
+        batch_questions: List[Tuple[str, str, str]] = []
+        patient_family_map: Dict[str, Optional[str]] = {}
 
-            current_patient_id = patient_question_set[0].patient_id or "UnknownPatient"
-            current_family_id = patient_question_set[0].family_id
-            print(
-                f"\n=== Processing Patient Set {patient_num} "
-                f"(Patient: '{current_patient_id}', Family: '{current_family_id or 'N/A'}') ==="
+        for patient_question_set in patient_questions:
+            if not patient_question_set:
+                continue
+            patient_id = patient_question_set[0].patient_id or "UnknownPatient"
+            patient_family_map[patient_id] = patient_question_set[0].family_id
+            for q_obj in patient_question_set:
+                batch_questions.append((patient_id, q_obj.field, q_obj.query))
+
+        if not batch_questions:
+            error_msg = "ERROR: No questions generated for patients."
+            print(error_msg)
+            return {
+                **state,
+                "messages": state["messages"] + [
+                    {"role": "assistant", "content": error_msg}
+                ]
+            }
+
+        prompt_lines = [
+            "Based on the PDF, answer all questions grouped by patient and field in JSON format like:",
+            "{",
+            '  "<patient_id>": {',
+            '    "<field>": "<answer>",',
+            "    ...",
+            "  },",
+            "  ...",
+            "}",
+            "",
+            "Questions:",
+        ]
+        for patient_id, field, question_text in batch_questions:
+            prompt_lines.append(f"- {patient_id}::{field}::{question_text}")
+        prompt = "\n".join(prompt_lines)
+
+        cache_identifier = self.generate_cache_identifier(prompt)
+        cached_data = self.load_from_cache(cache_identifier)
+        if cached_data is not None:
+            raw_answer = cached_data.get("raw_answer")
+        else:
+            print("Calling Gemini with batch question prompt...")
+            raw_answer = None
+            try:
+                if pdf_uri:
+                    result = self.ai_processor_client.answer_question(
+                        question=prompt,
+                        processor_name="gemini",
+                        pdf_uri=pdf_uri,
+                    )
+                else:
+                    result = self.ai_processor_client.answer_question(
+                        pdf_filepath,
+                        prompt,
+                        "gemini",
+                    )
+                if result:
+                    raw_answer = result[0]
+                    self.save_to_cache(cache_identifier, raw_answer, prompt, result[1])
+            except Exception as err:
+                print(f"ERROR using AIProcessorClient: {err}")
+
+        patient_results: List[Dict[str, Any]] = []
+        if raw_answer:
+            try:
+                text = raw_answer.strip()
+                if text.startswith("```"):
+                    text = re.sub(r"^```(?:json)?\s*", "", text)
+                    text = re.sub(r"\s*```$", "", text).strip()
+                else:
+                    match = re.search(r"\{.*\}", text, re.DOTALL)
+                    if match:
+                        text = match.group(0)
+                    else:
+                        print("ERROR: JSON content not found in Gemini response")
+                        text = ""
+
+                print("Sanitized raw response before json.loads:")
+                print(text)
+
+                if not text or not text.strip():
+                    print("ERROR: Formatted response is empty before json.loads")
+                    parsed = None
+                else:
+                    parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    for pid, answers in parsed.items():
+                        row: Dict[str, Any] = {
+                            "family_id": patient_family_map.get(pid) or "-99",
+                            "individual_id": pid,
+                        }
+                        if isinstance(answers, dict):
+                            for field, answer in answers.items():
+                                row[field] = answer
+                        patient_results.append(row)
+                else:
+                    print("ERROR: Parsed batch JSON is not a dictionary.")
+            except Exception as parse_err:
+                print(f"ERROR parsing batch JSON: {parse_err}")
+        else:
+            print("ERROR: No raw answer returned from Gemini.")
+
+        if patient_results:
+            patient_results = self.batch_format_patient_results(
+                patient_results, state["mapping_items"]
             )
 
-            patient_results = {}
-            patient_results["family_id"] = current_family_id or "-99"
-            patient_results["individual_id"] = current_patient_id
-
-            for q_obj in patient_question_set:
-                print(f"--- Querying for field: {q_obj.field} (Patient: {current_patient_id}) ---")
-                query_text = q_obj.query
-
-                # Generate a cache identifier for this query
-                cache_identifier = self.generate_cache_identifier(query_text)
-
-                # Try to load from cache first
-                cached_data = self.load_from_cache(cache_identifier)
-                if cached_data is not None:
-                    raw_answer = cached_data.get("raw_answer")
-                    context = cached_data.get("context")
-                    print(f"  Using cached answer: {raw_answer[:50]}...")
-                    print(f"  Using cached context: {context[:50] if context else 'None'}...")
-                else:
-                    # Use AIProcessorClient to get the answer
-                    raw_answer = None
-                    context = None
-                    try:
-                        print(f"Using AIProcessorClient for query: {query_text[:50]}...")
-
-                        # Use query_processor if available, default to "gemini"
-                        processor_name = getattr(q_obj, "query_processor", "gemini")
-                        result = self.ai_processor_client.answer_question(pdf_filepath, query_text, processor_name)
-                        if result:
-                            raw_answer, context = result
-                            print(f"AIProcessorClient found answer: {raw_answer[:50]}...")
-                            print(f"AIProcessorClient context: {context[:50] if context else 'None'}...")
-                            # Save to cache if we got an answer
-                            self.save_to_cache(cache_identifier, raw_answer, query_text, context)
-                        else:
-                            print("AIProcessorClient returned no answer.")
-                    except Exception as processor_err:
-                        print(f"ERROR using AIProcessorClient: {processor_err}")
-                        raw_answer = None
-                        context = None
-
-                # Format the answer if we got one
-                if raw_answer:
-                    try:
-                        # Generate a cache identifier for the formatting request
-                        format_cache_identifier = self.generate_cache_identifier(
-                            query_text=f"format_{raw_answer}_{q_obj.response_convertion_strategy}"
-                        )
-
-                        # Try to load formatted answer from cache first
-                        cached_format_data = self.load_from_cache(format_cache_identifier)
-
-                        if cached_format_data is not None:
-                            formatted_answer = cached_format_data.get("raw_answer")
-                            format_context = cached_format_data.get("context")
-                            print(f"Using cached formatted answer: {formatted_answer}")
-                            print(
-                                f"Using cached format context: {format_context[:50] if format_context else 'None'}..."
-                            )
-                        else:
-                            # Use AIProcessorClient for formatting
-                            formatted_answer = None
-                            format_context = None
-                            try:
-                                print("Using AIProcessorClient for formatting...")
-                                # Use query_processor if available, default to "gemini"
-                                processor_name = getattr(q_obj, "query_processor", "gemini")
-                                format_result = self.ai_processor_client.format_answer(
-                                    raw_answer,
-                                    q_obj.response_convertion_strategy,
-                                    processor_name
-                                )
-                                if format_result:
-                                    formatted_answer, format_context = format_result
-                                    print(f"AIProcessorClient formatted answer: {formatted_answer}")
-                                    print(
-                                        f"AIProcessorClient format context: "
-                                        f"{format_context[:50] if format_context else 'None'}..."
-                                    )
-                                    # Save formated answer to cache
-                                    format_question = f"Format answer for: {query_text}"
-                                    self.save_to_cache(
-                                        format_cache_identifier,
-                                        formatted_answer,
-                                        format_question,
-                                        format_context
-                                    )
-                                else:
-                                    print("  AIProcessorClient returned no formatted answer.")
-                            except Exception as format_err:
-                                print(f"  ERROR using AIProcessorClient for formatting: {format_err}")
-                                formatted_answer = None
-                                format_context = None
-
-                            # If no processor could format the answer, use a default
-                            if formatted_answer is None:
-                                formatted_answer = "-99_FORMAT_ERROR"
-                                print(f"  No processor could format the answer. Using default: {formatted_answer}")
-
-                        patient_results[q_obj.field] = formatted_answer
-                        print(f"  Final formatted answer: {formatted_answer}")
-                    except Exception as format_err:
-                        print(f"  ERROR during formatting: {format_err}")
-                        patient_results[q_obj.field] = "-99_FORMAT_ERROR"
-                else:
-                    patient_results[q_obj.field] = "-99_NO_ANSWER"
-                    print("  No answer found. Using default: -99_NO_ANSWER")
-
-            all_patient_data_rows.append(patient_results)
-
-        print(f"Processed {len(all_patient_data_rows)} patient data rows.")
+        print(f"Processed {len(patient_results)} patient data rows.")
 
         return {
             **state,
-            "patient_answers": all_patient_data_rows,
+            "patient_answers": patient_results,
             "messages": state["messages"] + [
-                {"role": "assistant", "content": f"Processed {len(all_patient_data_rows)} patient data rows."}
+                {"role": "assistant", "content": f"Processed {len(patient_results)} patient data rows."}
             ]
         }
+
+    def batch_format_patient_results(
+        self,
+        patient_results: List[Dict[str, Any]],
+        mapping_items: List[MappingItem],
+    ) -> List[Dict[str, Any]]:
+        """Format all patient answers in one Gemini request."""
+        raw_values: Dict[str, Dict[str, Any]] = {}
+        for row in patient_results:
+            patient_id = row.get("individual_id")
+            if not patient_id:
+                continue
+            for field, value in row.items():
+                if field in ("individual_id", "family_id"):
+                    continue
+                raw_values.setdefault(patient_id, {})[field] = value
+
+        if not raw_values:
+            return patient_results
+
+        field_rules: Dict[str, str] = {}
+        for item in mapping_items:
+            field_rules[item.field] = item.response_convertion_strategy
+
+        patient_ids = list(raw_values.keys())
+        prompt_json = json.dumps(raw_values, ensure_ascii=False)
+        fields_in_results = {fld for patient in raw_values.values() for fld in patient.keys()}
+        rules_lines = [
+            f"Поле: {fld}\nПравило: {field_rules[fld]}" for fld in fields_in_results if fld in field_rules
+        ]
+        rules_block = "\n".join(rules_lines)
+
+        formatted_data: Dict[str, Any] = {}
+        missing_ids = patient_ids
+        if self.pmid:
+            cached = load_formatted_result(self.pmid, patient_ids)
+            if cached:
+                formatted_data.update(cached)
+                missing_ids = [pid for pid in patient_ids if pid not in cached]
+
+        if missing_ids:
+            strategy = (
+                "Ниже даны необработанные ответы по пациентам и полям в формате JSON. "
+                "Отформатируйте значения в соответствии со следующими правилами:\n"
+                f"{rules_block}\n\n"
+                "Ответ верните строго в формате:\n{\n  \"<patient_id>\": {\n    \"<field>\": \"<formatted>\"\n  }\n}"
+            )
+
+            batches = [missing_ids[i : i + 3] for i in range(0, len(missing_ids), 3)]
+            for batch in batches:
+                try:
+                    subset_json = json.dumps({pid: raw_values[pid] for pid in batch}, ensure_ascii=False)
+                    result = self.ai_processor_client.format_answer(
+                        subset_json,
+                        strategy,
+                        "gemini",
+                        pmid=self.pmid,
+                    )
+                    if not result:
+                        print("ERROR: AIProcessorClient returned no result for batch formatting.")
+                        continue
+
+                    formatted_json_text = result[0]
+                    if not formatted_json_text or not formatted_json_text.strip().startswith("{"):
+                        print("ERROR: Gemini formatting response is empty или не JSON:\n---")
+                        print(formatted_json_text)
+                        continue
+
+                    text = formatted_json_text.strip()
+                    if text.startswith("```"):
+                        text = re.sub(r"^```(?:json)?\s*", "", text)
+                        text = re.sub(r"\s*```$", "", text).strip()
+                    else:
+                        match = re.search(r"\{.*\}", text, re.DOTALL)
+                        if match:
+                            text = match.group(0)
+
+                    formatted_json_text = text
+                    if not formatted_json_text or not formatted_json_text.strip():
+                        print("ERROR: Formatted response is empty before json.loads")
+                        continue
+                    try:
+                        new_data = json.loads(formatted_json_text)
+                        if isinstance(new_data, dict):
+                            missing_from_batch = [pid for pid in batch if pid not in new_data]
+                            if missing_from_batch:
+                                print(
+                                    f"WARNING: Server response missing {len(missing_from_batch)} patients: {missing_from_batch}"
+                                )
+                            formatted_data.update(new_data)
+                            if self.pmid:
+                                save_formatted_result(
+                                    self.pmid,
+                                    subset_json,
+                                    formatted_json_text,
+                                    strategy,
+                                    new_data,
+                                )
+                        else:
+                            print("ERROR: Parsed batch JSON is not a dictionary.")
+                    except Exception as parse_err:
+                        print(f"ERROR parsing batch JSON: {parse_err}")
+                except Exception as err:
+                    print(f"ERROR using AIProcessorClient for batch formatting: {err}")
+
+        if formatted_data:
+            for row in patient_results:
+                pid = row.get("individual_id")
+                patient_fields = formatted_data.get(pid, {}) if isinstance(formatted_data, dict) else {}
+                for field in list(row.keys()):
+                    if field in ("individual_id", "family_id"):
+                        continue
+                    formatted_val = patient_fields.get(field)
+                    if formatted_val is None:
+                        row[field] = "-99_FORMAT_ERROR"
+                    else:
+                        row[field] = formatted_val
+        else:
+            print("ERROR: Failed to format batch answers or parse result.")
+
+        return patient_results
 
     def setup(self):
         """Set up the agent by building the graph."""
