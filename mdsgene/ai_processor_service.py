@@ -1,7 +1,8 @@
 # ai_processor_service.py
 import os
-from typing import Dict, Any
 from pathlib import Path
+from typing import Any
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -17,8 +18,8 @@ app = FastAPI(
 
 # Models for request/response
 class QuestionRequest(BaseModel):
-    pdf_filepath: Optional[str] = None
-    pdf_uri: Optional[str] = None
+    pdf_filepath: str | None = None
+    pdf_uri: str | None = None
     question: str
     processor_name: str = "gemini"  # Default to gemini
 
@@ -26,16 +27,16 @@ class FormatRequest(BaseModel):
     raw_answer: str
     strategy: str
     processor_name: str = "gemini"  # Default to gemini
-    pmid: Optional[str] = None
+    pmid: str | None = None
 
 class PatientIdentifiersRequest(BaseModel):
-    pdf_filepath: Optional[str] = None
-    pdf_uri: Optional[str] = None
+    pdf_filepath: str | None = None
+    pdf_uri: str | None = None
     processor_name: str = "gemini"  # Default to gemini
 
 class PublicationDetailsRequest(BaseModel):
-    pdf_filepath: Optional[str] = None
-    pdf_uri: Optional[str] = None
+    pdf_filepath: str | None = None
+    pdf_uri: str | None = None
     processor_name: str = "gemini"  # Default to gemini
 
 # Processor registry
@@ -44,7 +45,7 @@ PROCESSORS = {
 }
 
 # Helper function to initialize processor
-def get_processor(processor_name: str, pdf_filepath: Optional[str], pdf_uri: Optional[str]):
+def get_processor(processor_name: str, pdf_filepath: str | None, pdf_uri: str | None):
     """
     Initialize and return the requested processor.
 
@@ -78,13 +79,13 @@ def get_processor(processor_name: str, pdf_filepath: Optional[str], pdf_uri: Opt
         raise HTTPException(status_code=500, detail=f"Failed to initialize processor: {str(e)}")
 
 # Endpoints
-@app.post("/answer_question", response_model=Dict[str, Any])
+@app.post("/answer_question", response_model=dict[str, Any])
 async def answer_question(request: QuestionRequest):
     """
     Answer a question based on the content of a PDF file.
 
     Args:
-        request: QuestionRequest object containing pdf_filepath, question, and processor_name
+        request: QuestionRequest object containing pdf_filepath, questions and processor_name
 
     Returns:
         Dictionary with answer and context
@@ -103,7 +104,7 @@ async def answer_question(request: QuestionRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing question: {str(e)}")
 
-@app.post("/format_answer", response_model=Dict[str, Any])
+@app.post("/format_answer", response_model=dict[str, Any])
 async def format_answer(request: FormatRequest):
     """
     Format a raw answer according to a specific strategy using GeminiTextProcessor.
@@ -156,7 +157,7 @@ async def format_answer(request: FormatRequest):
         traceback.print_exc() # Print traceback for debugging
         raise HTTPException(status_code=500, detail=f"Error formatting answer: {str(e)}")
 
-@app.post("/get_patient_identifiers", response_model=Dict[str, Any])
+@app.post("/get_patient_identifiers", response_model=dict[str, Any])
 async def get_patient_identifiers(request: PatientIdentifiersRequest):
     """
     Extract patient identifiers from a PDF file.
@@ -181,7 +182,7 @@ async def get_patient_identifiers(request: PatientIdentifiersRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error extracting patient identifiers: {str(e)}")
 
-@app.post("/extract_publication_details", response_model=Dict[str, Any])
+@app.post("/extract_publication_details", response_model=dict[str, Any])
 async def extract_publication_details(request: PublicationDetailsRequest):
     """
     Extract publication details from a PDF file.

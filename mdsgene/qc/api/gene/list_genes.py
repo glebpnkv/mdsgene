@@ -1,15 +1,15 @@
-import os
 import json
-from typing import List, Optional
-from qc.config import properties_directory
+import os
+
+from mdsgene.qc.config import properties_directory
 
 
-def get_symptom_gene_mapping_files(directory: str = None) -> List[str]:
+def get_symptom_gene_mapping_files(directory: str = None) -> list[str]:
     if directory is None:
         directory = properties_directory
 
     try:
-        # Получаем список всех файлов в директории
+        # Fetch a list of all files in the directory
         files = os.listdir(directory)
         return sorted(files)
     except Exception as e:
@@ -17,8 +17,11 @@ def get_symptom_gene_mapping_files(directory: str = None) -> List[str]:
         return []
 
 
-def get_file_id_from_disease_gene(disease_gene_pair: str, file_name: str = "disease_gene_mapping.json",
-                                  directory: str = None) -> Optional[str]:
+def get_file_id_from_disease_gene(
+    disease_gene_pair: str, 
+    file_name: str = "disease_gene_mapping.json",
+    directory: str = None
+) -> str | None:
     if directory is None:
         directory = properties_directory
 

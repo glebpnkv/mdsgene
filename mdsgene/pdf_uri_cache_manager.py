@@ -1,13 +1,17 @@
 import json
+import logging
 from pathlib import Path
-from typing import Optional, Dict
+
+# Get a logger for this module
+logger = logging.getLogger(__name__)
+
 
 class PdfUriCacheManager:
     """Simple file-based cache mapping PDF filenames to Gemini URIs."""
 
     def __init__(self, cache_path: Path = Path("cache/pdf_uri_cache.json")):
         self.cache_path = cache_path
-        self.cache: Dict[str, str] = {}
+        self.cache: dict[str, str] = {}
         self._load_cache()
 
     def _load_cache(self) -> None:
@@ -26,9 +30,9 @@ class PdfUriCacheManager:
             with open(self.cache_path, "w", encoding="utf-8") as f:
                 json.dump(self.cache, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"[PdfUriCacheManager] Failed to save cache: {e}")
+            logger.error(f"[PdfUriCacheManager] Failed to save cache: {e}")
 
-    def get_uri(self, filename: str) -> Optional[str]:
+    def get_uri(self, filename: str) -> str | None:
         return self.cache.get(filename)
 
     def save_uri(self, filename: str, uri: str) -> None:

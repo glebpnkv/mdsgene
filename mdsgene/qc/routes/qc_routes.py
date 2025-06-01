@@ -1,42 +1,62 @@
-import os
-from typing import List, Optional
-from typing import Dict, Union
 import json
+import os
+import shutil
+from collections import OrderedDict
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Form, UploadFile, File
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
-from qc.api.gene.merge_symptoms import merge_symptoms, MergeSymptomRequest
-from qc.api.symptoms_service.service import update_symptom_order, get_categories_with_nested_keys
-from qc.logging_config import logger
-from qc.api.files import get_excel_files_list
-from qc.api.gene import gene_excel_file, delete_excel_file, update_symptom_categories
-from qc.api.gene.list_genes import get_symptom_gene_mapping_files  # Оставляем только get_unique_genes
-from qc.api.gene.update_excel_file import update_excel_file_content
-from qc.api.gene.update_symptom_categories import update_symptom_categories
-from qc.config import properties_directory, version_folder, excel_folder
-import shutil
-import pandas as pd
-from collections import OrderedDict
+from mdsgene.qc.api.files import get_excel_files_list
+from mdsgene.qc.api.gene import delete_excel_file
+from mdsgene.qc.api.gene import gene_excel_file, update_symptom_categories
+from mdsgene.qc.api.gene.list_genes import get_symptom_gene_mapping_files
+from mdsgene.qc.api.gene.merge_symptoms import merge_symptoms, MergeSymptomRequest
+from mdsgene.qc.api.gene.update_excel_file import update_excel_file_content
+from mdsgene.qc.api.symptoms_service.service import update_symptom_order, get_categories_with_nested_keys
+from mdsgene.qc.config import properties_directory, version_folder, excel_folder
+from mdsgene.qc.logging_config import logger
 
 router = APIRouter()
 
-@router.get("/list_excel_files", response_model=List[str])
+# Ensure versions folder exists
+os.makedirs(version_folder, exist_ok=True)
+
+
+class SymptomOrder(BaseModel):
+    """Model for symptom data that client will send to server"""
+    geneName: str
+    symptomName: str
+    categoryName: str
+    order: int
+
+# Update request model
+class DeleteColumnsRequest(BaseModel):
+    file_name: str
+    columns: list[str]
+
+class RenameSymptomRequest(BaseModel):
+    json_file: str
+    old_name: str
+    new_name: str
+
+
+@router.get("/list_excel_files", response_model=list[str])
 async def get_excel_files():
     try:
-        # Получаем список файлов с помощью функции из отдельного модуля
+        # Get list of files using function from separate module
         excel_files = get_excel_files_list()
 
         return JSONResponse(content=excel_files)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@router.get("/list_diseases_genes", response_model=List[str])  # Переименованный эндпоинт
+@router.get("/list_diseases_genes", response_model=list[str])  # Переименованный эндпоинт
 async def list_diseases_genes():
     try:
         items = list(get_symptom_gene_mapping_files())
-        #remove empty strings and numbers
+        # Remove empty strings and numbers
         items = [item for item in items if isinstance(item, str) and item]
         return JSONResponse(content=items)
     except Exception as e:
@@ -57,20 +77,14 @@ async def update_excel_file(fileId: str = Form(...), newFile: UploadFile = File(
         logger.exception("Detailed error:")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# Определим модель для данных о симптомах, которую клиент отправит на сервер
-class SymptomOrder(BaseModel):
-    geneName: str
-    symptomName: str
-    categoryName: str
-    order: int
 
 @router.post("/set_symptom_order")
-async def set_symptoms_order(symptoms: List[SymptomOrder]):
-    # Добавляем логирование входящих данных
+async def set_symptoms_order(symptoms: list[SymptomOrder]):
+    # Add logging for incoming request data
     logger.info(f"Received set_symptom_order request with data: {symptoms}")
     try:
         updated = update_symptom_order(symptoms)
-        # Логируем результат вызова update_symptom_order
+        # Log result of update_symptom_order call
         logger.info(f"update_symptom_order returned: {updated}")
 
         if not updated:
@@ -86,17 +100,16 @@ async def upload_gene_excel_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="No selected file")
 
     try:
-        # Сохраняем файл и получаем имена колонок
+        # Save file and get column names
         file_path = os.path.join("excel", file.filename)
         column_names = gene_excel_file.save_file(file)
 
-        # Обновляем категории симптомов для загруженного файла
+        # Update symptom categories for uploaded file
         try:
             update_symptom_categories(file_path)
         except Exception as e:
             logger.error(f"Error updating symptom categories: {str(e)}")
-            # Не прерываем выполнение, если обновление категорий не удалось
-            # Просто логируем ошибку
+            # Don't interrupt execution if the category update failed - log the error
 
         return JSONResponse(content={
             "message": "File uploaded successfully and symptoms categorized",
@@ -117,15 +130,11 @@ async def web_delete_excel_file(file_id : str):
     else:
         raise HTTPException(status_code=404, detail="File not found")
 
-# Обновим модель для запроса
-class DeleteColumnsRequest(BaseModel):
-    file_name: str
-    columns: List[str]
 
 @router.post("/delete_columns")
 async def delete_columns(request: DeleteColumnsRequest):
     try:
-        # Проверяем существование файла
+        # Check if file exists
         file_path = f"excel/{request.file_name}"
         if not os.path.exists(file_path):
             raise HTTPException(
@@ -133,11 +142,11 @@ async def delete_columns(request: DeleteColumnsRequest):
                 detail=f"File {request.file_name} not found"
             )
 
-        # Удаляем колонки из файла
+        # Remove columns from file
         success = gene_excel_file.delete_columns(file_path, request.columns)
 
         if success:
-            # Получаем обновленный список колонок
+            # Get updated list of columns
             remaining_columns = gene_excel_file.get_columns(file_path)
             return JSONResponse(content={
                 "message": "Columns deleted successfully",
@@ -179,17 +188,13 @@ async def merge_symptoms_endpoint(data: MergeSymptomRequest):
     return {"status": "success"}
 
 
-# Убедимся, что папка для версий существует
-os.makedirs(version_folder, exist_ok=True)
-
-
 def save_version(file_path, version_folder, prefix):
     prefix_folder = os.path.join(version_folder, prefix)
     os.makedirs(prefix_folder, exist_ok=True)
 
     base_name = os.path.basename(file_path)
 
-    # Удаление последующих версий
+    # Remove subsequent versions
     existing_versions = sorted(os.listdir(prefix_folder))
     current_version_number = len([v for v in existing_versions if v.split('.')[-1].isdigit()]) + 1
     for version in existing_versions:
@@ -199,7 +204,7 @@ def save_version(file_path, version_folder, prefix):
     version_path = os.path.join(prefix_folder, f"{base_name}.{current_version_number}")
     shutil.copy(file_path, version_path)
 
-    # Запись файла с номером текущей версии
+    # Write current version number file
     current_version_file = os.path.join(prefix_folder, "current_version")
     with open(current_version_file, 'w') as f:
         f.write(str(current_version_number))
@@ -250,10 +255,6 @@ def restore_version(file_path, version_folder, prefix, direction):
 
     return None
 
-class RenameSymptomRequest(BaseModel):
-    json_file: str
-    old_name: str
-    new_name: str
 
 @router.post("/rename-symptom")
 def rename_symptom_endpoint(request: RenameSymptomRequest):
@@ -323,6 +324,7 @@ def rename_symptom_endpoint(request: RenameSymptomRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/step")
 def step_version(json_file: str, direction: str):
     try:
@@ -343,6 +345,7 @@ def step_version(json_file: str, direction: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/list_symptoms")
 def get_current_json(json_file: str):
     try:
@@ -358,27 +361,6 @@ def get_current_json(json_file: str):
     except Exception as e:
         logger.error(f"Error in web_list_symptoms: {str(e)}")
         return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-# @router.get("/list_symptoms")
-# async def web_list_symptoms(
-#     file_name: str  # Теперь принимаем имя файла напрямую
-# ):
-#     try:
-#         # Формируем полный путь к файлу, используя properties_directory
-#         full_file_path = os.path.join(properties_directory, file_name)
-#         symptoms = get_categories_with_nested_keys(full_file_path)
-#         return JSONResponse(content=symptoms)
-#     except FileNotFoundError as e:
-#         logger.error(f"File not found: {str(e)}")
-#         return JSONResponse(status_code=404, content={"error": "File not found"})
-#     except json.JSONDecodeError as e:
-#         logger.error(f"Invalid JSON format: {str(e)}")
-#         return JSONResponse(status_code=400, content={"error": "Invalid file format"})
-#     except Exception as e:
-#         logger.error(f"Error in web_list_symptoms: {str(e)}")
-#         return JSONResponse(status_code=500, content={"error": str(e)})
-
 
 
 @router.get("/current-excel")

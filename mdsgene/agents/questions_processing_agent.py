@@ -1,17 +1,24 @@
 import hashlib
 import json
-import sys
+import logging
 import re
+import sys
+import traceback
 from pathlib import Path
+from typing import Annotated, Any
 
-from typing import Annotated
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
+
 from mdsgene.agents.base_agent import BaseAgent, CACHE_DIR
-from mdsgene.mapping_item import MappingItem, QuestionInfo
-from mdsgene.document_processor import DocumentProcessor
 from mdsgene.cache_utils import load_formatted_result, save_formatted_result
+from mdsgene.logging_config import configure_logging
+from mdsgene.mapping_item import MappingItem, QuestionInfo
 from mdsgene.pdf_uri_utils import resolve_pdf_uri
+
+# Get a logger for this module
+configure_logging()
+logger = logging.getLogger(__name__)
 
 
 # Define the state for our LangGraph
@@ -44,9 +51,9 @@ class QuestionsProcessingAgent(BaseAgent[State]):
         if not self.vector_store_dir.exists():
             try:
                 self.vector_store_dir.mkdir(parents=True, exist_ok=True)
-                print(f"Vector store directory created at: {self.vector_store_dir}")
+                logging.info(f"Vector store directory created at: {self.vector_store_dir}")
             except Exception as e:
-                print(f"Error creating vector store directory: {e}")
+                logging.error(f"Error creating vector store directory: {e}")
 
     def generate_cache_identifier(self, query_text: str) -> str:
         """
@@ -90,10 +97,10 @@ class QuestionsProcessingAgent(BaseAgent[State]):
             try:
                 with open(raw_answer_cache_filepath, "r", encoding="utf-8") as f:
                     cached_data = json.load(f)
-                    print(f"  Cache HIT for query (id: {cache_identifier[:8]}...)")
+                    logging.info(f"Cache HIT for query (id: {cache_identifier[:8]}...)")
                     return cached_data
             except Exception as e:
-                print(f"  ERROR loading from cache: {e}")
+                logging.error(f"ERROR loading from cache: {e}")
 
         return None
 
@@ -156,12 +163,18 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                             "raw_answer": cached_data.get("raw_answer", "")
                         })
             except Exception as e:
-                print(f"Error reading cache file {cache_file}: {e}")
+                logging.error(f"Error reading cache file {cache_file}: {e}")
                 continue
 
         return pmid_questions
 
-    def save_to_cache(self, cache_identifier: str, raw_answer: str, question: str = None, context: str = None):
+    def save_to_cache(
+        self,
+        cache_identifier: str,
+        raw_answer: str,
+        question: str = None,
+        context: str = None
+    ):
         """
         Save an answer to the cache file.
 
@@ -190,16 +203,15 @@ class QuestionsProcessingAgent(BaseAgent[State]):
 
             with open(raw_answer_cache_filepath, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f, indent=2, ensure_ascii=False)
-            print(f"  Saved answer and context to cache (id: {cache_identifier[:8]}...)")
+            logging.info(f"Saved answer and context to cache (id: {cache_identifier[:8]}...)")
         except Exception as e:
-            print(f"  ERROR saving to cache: {e}")
-
+            logging.error(f"ERROR saving to cache: {e}")
 
     def load_mapping_data(self, state: State) -> State:
         """Load mapping data from JSON file."""
         if not self.mapping_data_path.exists():
-            error_msg = f"ERROR: Mapping data file not found at {self.mapping_data_path}"
-            print(error_msg)
+            error_msg = f"Mapping data file not found at {self.mapping_data_path}"
+            logger.error(error_msg)
             return {
                 **state,
                 "messages": state["messages"] + [
@@ -233,7 +245,9 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                 else:
                     skipped_items += 1
 
-            print(f"Loaded {active_items} active mapping items from JSON (skipped {skipped_items} inactive items).")
+            logger.info(
+                f"Loaded {active_items} active mapping items from JSON (skipped {skipped_items} inactive items)."
+            )
 
             return {
                 **state,
@@ -247,10 +261,9 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                 ]
             }
         except Exception as e:
-            error_msg = f"ERROR: Failed to load mapping data: {e}"
-            print(error_msg)
-            import traceback
-            traceback.print_exc()
+            error_msg = f"Failed to load mapping data: {e}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
             return {
                 **state,
                 "messages": state["messages"] + [
@@ -263,28 +276,28 @@ class QuestionsProcessingAgent(BaseAgent[State]):
         cache = self.load_cache()
         loaded_from_cache = False
 
-        print("\nGetting patient identifiers (checking cache)...")
+        logger.info("\nGetting patient identifiers (checking cache)...")
         cached_data = cache.get(self.patient_cache_key)
 
         if cached_data is not None:
-            print("  Cache HIT for patient identifiers.")
+            logger.debug("Cache HIT for patient identifiers.")
             try:
                 if isinstance(cached_data, list):
                     patient_identifiers = cached_data
-                    print(f"  Successfully loaded {len(patient_identifiers)} identifiers from cache.")
+                    logger.info(f"Successfully loaded {len(patient_identifiers)} identifiers from cache.")
                     loaded_from_cache = True
                 else:
-                    print("  WARNING: Cached data for patient identifiers is not a list.")
+                    logging.warning("WARNING: Cached data for patient identifiers is not a list.")
             except Exception:
-                print("  ERROR: Failed to parse cached patient identifiers.")
+                print("ERROR: Failed to parse cached patient identifiers.")
 
         if not loaded_from_cache:
-            error_msg = ("ERROR: Patient identifiers not found in cache. "
+            error_msg = ("Patient identifiers not found in cache. "
                          "This agent requires pre-cached patient identifiers.")
-            print(error_msg)
+            logger.error(error_msg)
             raise ValueError(error_msg)
 
-        print(f"--> Proceeding with {len(patient_identifiers)} patient identifiers.")
+        logger.info(f"Proceeding with {len(patient_identifiers)} patient identifiers.")
 
         return {
             **state,
@@ -300,8 +313,8 @@ class QuestionsProcessingAgent(BaseAgent[State]):
         patient_identifiers = state["patient_identifiers"]
 
         if not mapping_items:
-            error_msg = "ERROR: No mapping items loaded. Cannot generate questions."
-            print(error_msg)
+            error_msg = "No mapping items loaded. Cannot generate questions."
+            logger.error(error_msg)
             return {
                 **state,
                 "messages": state["messages"] + [
@@ -310,8 +323,8 @@ class QuestionsProcessingAgent(BaseAgent[State]):
             }
 
         if not patient_identifiers:
-            error_msg = "ERROR: No patient identifiers found. Cannot generate questions."
-            print(error_msg)
+            error_msg = "No patient identifiers found. Cannot generate questions."
+            logger.error(error_msg)
             return {
                 **state,
                 "messages": state["messages"] + [
@@ -320,7 +333,7 @@ class QuestionsProcessingAgent(BaseAgent[State]):
             }
 
         list_of_patient_question_sets = []
-        print(f"\nGenerating questions for {len(patient_identifiers)} unique patients...")
+        logger.info(f"\nGenerating questions for {len(patient_identifiers)} unique patients...")
 
         for entry in patient_identifiers:
             patient_id = entry.get("patient")
@@ -345,12 +358,12 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                     )
                     one_patient_questions.append(q_info)
                 except Exception as e:
-                    print(f"ERROR: Failed to create QuestionInfo: {e}") # Error should be more informative now
+                    logger.error(f"Failed to create QuestionInfo: {e}")  # Error should be more informative now
                     continue
 
             list_of_patient_question_sets.append(one_patient_questions)
 
-        print(f"Generated question sets for {len(list_of_patient_question_sets)} patients.")
+        logger.info(f"Generated question sets for {len(list_of_patient_question_sets)} patients.")
 
         return {
             **state,
@@ -370,8 +383,8 @@ class QuestionsProcessingAgent(BaseAgent[State]):
         pdf_uri = resolve_pdf_uri(Path(pdf_filepath))
 
         if not patient_questions:
-            error_msg = "ERROR: No patient question sets generated. Cannot process patients."
-            print(error_msg)
+            error_msg = "No patient question sets generated. Cannot process patients."
+            logger.error(error_msg)
             return {
                 **state,
                 "messages": state["messages"] + [
@@ -379,10 +392,10 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                 ]
             }
 
-        print(f"\nProcessing {len(patient_questions)} identified patient sets...")
+        logger.info(f"\nProcessing {len(patient_questions)} identified patient sets...")
 
-        batch_questions: List[Tuple[str, str, str]] = []
-        patient_family_map: Dict[str, Optional[str]] = {}
+        batch_questions: list[tuple[str, str, str]] = []
+        patient_family_map: dict[str, str | None] = {}
 
         for patient_question_set in patient_questions:
             if not patient_question_set:
@@ -393,8 +406,8 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                 batch_questions.append((patient_id, q_obj.field, q_obj.query))
 
         if not batch_questions:
-            error_msg = "ERROR: No questions generated for patients."
-            print(error_msg)
+            error_msg = "No questions generated for patients."
+            logger.error(error_msg)
             return {
                 **state,
                 "messages": state["messages"] + [
@@ -423,7 +436,7 @@ class QuestionsProcessingAgent(BaseAgent[State]):
         if cached_data is not None:
             raw_answer = cached_data.get("raw_answer")
         else:
-            print("Calling Gemini with batch question prompt...")
+            logger.info("Calling Gemini with batch question prompt...")
             raw_answer = None
             try:
                 if pdf_uri:
@@ -442,9 +455,9 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                     raw_answer = result[0]
                     self.save_to_cache(cache_identifier, raw_answer, prompt, result[1])
             except Exception as err:
-                print(f"ERROR using AIProcessorClient: {err}")
+                logger.error(f"Error using AIProcessorClient: {err}")
 
-        patient_results: List[Dict[str, Any]] = []
+        patient_results: list[dict[str, Any]] = []
         if raw_answer:
             try:
                 text = raw_answer.strip()
@@ -456,20 +469,20 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                     if match:
                         text = match.group(0)
                     else:
-                        print("ERROR: JSON content not found in Gemini response")
+                        logger.error("JSON content not found in Gemini response")
                         text = ""
 
-                print("Sanitized raw response before json.loads:")
-                print(text)
+                logger.debug("Sanitized raw response before json.loads:")
+                logger.debug(text)
 
                 if not text or not text.strip():
-                    print("ERROR: Formatted response is empty before json.loads")
+                    logger.error("Formatted response is empty before json.loads")
                     parsed = None
                 else:
                     parsed = json.loads(text)
                 if isinstance(parsed, dict):
                     for pid, answers in parsed.items():
-                        row: Dict[str, Any] = {
+                        row: dict[str, Any] = {
                             "family_id": patient_family_map.get(pid) or "-99",
                             "individual_id": pid,
                         }
@@ -478,18 +491,18 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                                 row[field] = answer
                         patient_results.append(row)
                 else:
-                    print("ERROR: Parsed batch JSON is not a dictionary.")
+                    logger.error("Parsed batch JSON is not a dictionary.")
             except Exception as parse_err:
-                print(f"ERROR parsing batch JSON: {parse_err}")
+                logger.error(f"ERROR parsing batch JSON: {parse_err}")
         else:
-            print("ERROR: No raw answer returned from Gemini.")
+            logger.error("No raw answer returned from Gemini.")
 
         if patient_results:
             patient_results = self.batch_format_patient_results(
                 patient_results, state["mapping_items"]
             )
 
-        print(f"Processed {len(patient_results)} patient data rows.")
+        logger.info(f"Processed {len(patient_results)} patient data rows.")
 
         return {
             **state,
@@ -501,11 +514,11 @@ class QuestionsProcessingAgent(BaseAgent[State]):
 
     def batch_format_patient_results(
         self,
-        patient_results: List[Dict[str, Any]],
-        mapping_items: List[MappingItem],
-    ) -> List[Dict[str, Any]]:
+        patient_results: list[dict[str, Any]],
+        mapping_items: list[MappingItem],
+    ) -> list[dict[str, Any]]:
         """Format all patient answers in one Gemini request."""
-        raw_values: Dict[str, Dict[str, Any]] = {}
+        raw_values: dict[str, dict[str, Any]] = {}
         for row in patient_results:
             patient_id = row.get("individual_id")
             if not patient_id:
@@ -518,19 +531,18 @@ class QuestionsProcessingAgent(BaseAgent[State]):
         if not raw_values:
             return patient_results
 
-        field_rules: Dict[str, str] = {}
+        field_rules: dict[str, str] = {}
         for item in mapping_items:
             field_rules[item.field] = item.response_convertion_strategy
 
         patient_ids = list(raw_values.keys())
-        prompt_json = json.dumps(raw_values, ensure_ascii=False)
         fields_in_results = {fld for patient in raw_values.values() for fld in patient.keys()}
         rules_lines = [
-            f"Поле: {fld}\nПравило: {field_rules[fld]}" for fld in fields_in_results if fld in field_rules
+            f"Field: {fld}\nRule: {field_rules[fld]}" for fld in fields_in_results if fld in field_rules
         ]
         rules_block = "\n".join(rules_lines)
 
-        formatted_data: Dict[str, Any] = {}
+        formatted_data: dict[str, Any] = {}
         missing_ids = patient_ids
         if self.pmid:
             cached = load_formatted_result(self.pmid, patient_ids)
@@ -540,10 +552,10 @@ class QuestionsProcessingAgent(BaseAgent[State]):
 
         if missing_ids:
             strategy = (
-                "Ниже даны необработанные ответы по пациентам и полям в формате JSON. "
-                "Отформатируйте значения в соответствии со следующими правилами:\n"
+                "Below are the raw patient answers and fields in JSON format. "
+                "Format the values according to the following rules:\n"
                 f"{rules_block}\n\n"
-                "Ответ верните строго в формате:\n{\n  \"<patient_id>\": {\n    \"<field>\": \"<formatted>\"\n  }\n}"
+                "Return answer strictly in format:\n{\n  \"<patient_id>\": {\n    \"<field>\": \"<formatted>\"\n  }\n}"
             )
 
             batches = [missing_ids[i : i + 3] for i in range(0, len(missing_ids), 3)]
@@ -557,13 +569,13 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                         pmid=self.pmid,
                     )
                     if not result:
-                        print("ERROR: AIProcessorClient returned no result for batch formatting.")
+                        logger.error("AIProcessorClient returned no result for batch formatting.")
                         continue
 
                     formatted_json_text = result[0]
                     if not formatted_json_text or not formatted_json_text.strip().startswith("{"):
-                        print("ERROR: Gemini formatting response is empty или не JSON:\n---")
-                        print(formatted_json_text)
+                        logger.error("ERROR: Gemini formatting response is empty or not JSON:\n---")
+                        logger.error(formatted_json_text)
                         continue
 
                     text = formatted_json_text.strip()
@@ -577,15 +589,16 @@ class QuestionsProcessingAgent(BaseAgent[State]):
 
                     formatted_json_text = text
                     if not formatted_json_text or not formatted_json_text.strip():
-                        print("ERROR: Formatted response is empty before json.loads")
+                        logging.error("ERROR: Formatted response is empty before json.loads")
                         continue
                     try:
                         new_data = json.loads(formatted_json_text)
                         if isinstance(new_data, dict):
                             missing_from_batch = [pid for pid in batch if pid not in new_data]
                             if missing_from_batch:
-                                print(
-                                    f"WARNING: Server response missing {len(missing_from_batch)} patients: {missing_from_batch}"
+                                logging.warning(
+                                    f"WARNING: Server response missing {len(missing_from_batch)} "
+                                    f"patients: {missing_from_batch}"
                                 )
                             formatted_data.update(new_data)
                             if self.pmid:
@@ -597,11 +610,11 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                                     new_data,
                                 )
                         else:
-                            print("ERROR: Parsed batch JSON is not a dictionary.")
+                            logger.error("Parsed batch JSON is not a dictionary.")
                     except Exception as parse_err:
                         print(f"ERROR parsing batch JSON: {parse_err}")
                 except Exception as err:
-                    print(f"ERROR using AIProcessorClient for batch formatting: {err}")
+                    logger.error(f"ERROR using AIProcessorClient for batch formatting: {err}")
 
         if formatted_data:
             for row in patient_results:
@@ -616,7 +629,7 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                     else:
                         row[field] = formatted_val
         else:
-            print("ERROR: Failed to format batch answers or parse result.")
+            logger.error("Failed to format batch answers or parse result.")
 
         return patient_results
 
@@ -632,11 +645,13 @@ class QuestionsProcessingAgent(BaseAgent[State]):
 
     def print_results(self, final_state: State):
         """Print the results of running the agent."""
-        print("\n=== Results ===")
-        print(f"PDF: {Path(final_state['pdf_filepath']).name}")
-        print(f"Mapping Items: {len(final_state.get('mapping_items', []))} items")
-        print(f"Patient Identifiers: {len(final_state.get('patient_identifiers', []))} patients")
-        print(f"Patient Answers: {len(final_state.get('patient_answers', []))} rows")
+        logger.info(
+            f"\n=== Results ===\n"
+            f"PDF: {Path(final_state['pdf_filepath']).name}\n"
+            f"Mapping Items: {len(final_state.get('mapping_items', []))} items\n"
+            f"Patient Identifiers: {len(final_state.get('patient_identifiers', []))} patients\n"
+            f"Patient Answers: {len(final_state.get('patient_answers', []))} rows"
+        )
 
         # Call the base class method to print the conversation
         super().print_results(final_state)
@@ -653,10 +668,10 @@ def main():
 
     # Validate the PDF filepath
     if not Path(pdf_filepath).exists():
-        print(f"Error: PDF file not found at {pdf_filepath}")
+        logger.error(f"PDF file not found at {pdf_filepath}")
         sys.exit(1)
 
-    print(f"Processing PDF: {pdf_filepath}")
+    logger.info(f"Processing PDF: {pdf_filepath}")
 
     # Initialize the agent
     agent = QuestionsProcessingAgent()
@@ -683,12 +698,11 @@ def main():
 
     except ValueError as e:
         # This will catch the exception thrown when patient identifiers are not found in cache
-        print(f"ERROR: {e}")
+        logger.error(f"ERROR: {e}")
         sys.exit(1)
     except Exception as e:
-        print(f"ERROR: An unexpected error occurred: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"ERROR: An unexpected error occurred: {e}")
+        logger.error(traceback.format_exc())
         sys.exit(1)
 
 

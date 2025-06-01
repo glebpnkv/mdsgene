@@ -1,14 +1,15 @@
-import pandas as pd
-import numpy as np
-import os
-import re
 import json
 import logging
-from difflib import get_close_matches
 import math
+import os
+import re
 from collections import OrderedDict
-from typing import List, Dict, Any, Optional
-from qc.config import properties_directory
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from mdsgene.qc.config import properties_directory
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -489,7 +490,7 @@ def get_cached_dataframe(file_path):
 
         df = pd.read_excel(file_path, engine=engine)
 
-        # Convert all headers to lower case
+        # Convert all headers to lowercase
         df.columns = df.columns.str.lower()
 
         for col in df.columns:
@@ -565,12 +566,14 @@ def apply_filter(df, filter_criteria, aao, country: str, mutation: str):
 
             condition = genotype_condition | comments_condition
             logger.info(
-                f"Filtering using 'comments_pat' column (actual name: {comments_pat_column}) for criteria {filter_criteria}"
+                f"Filtering using 'comments_pat' column (actual name: {comments_pat_column}) "
+                f"for criteria {filter_criteria}"
             )
         else:
             condition = genotype_condition
             logger.warning(
-                f"'comments_pat' column not found in the DataFrame for criteria {filter_criteria}. Available columns: %s",
+                f"'comments_pat' column not found in the DataFrame for criteria {filter_criteria}. "
+                f"Available columns: %s",
                 df.columns.tolist(),
             )
             logger.warning(
@@ -634,17 +637,6 @@ def apply_filter(df, filter_criteria, aao, country: str, mutation: str):
     return df
 
 
-class NumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return super(NumpyEncoder, self).default(obj)
-
-
 def safe_get(df, column, index, default=None):
     try:
         if isinstance(df, pd.DataFrame):
@@ -659,12 +651,12 @@ def safe_get(df, column, index, default=None):
         if isinstance(value, (np.integer, np.floating)):
             return value.item()
         return value
-    except:
+    except Exception:
         return default
 
 
-# Define the function to load the categories metadata
 def load_symptom_categories(directory=properties_directory):
+    """Function to load the categories metadata"""
     # Construct the full path to the categories metadata file
     categories_file_path = os.path.join(directory, "symptom_categories.json")
 
@@ -701,10 +693,8 @@ def extract_year(author_year):
     return 0  # Default to 0 if no year is found
 
 
-def is_valid_mutation(mutation: Dict[str, Any]) -> bool:
-    """
-    Check if a mutation entry has valid data and should be included.
-    """
+def is_valid_mutation(mutation: dict[str, Any]) -> bool:
+    """Check if a mutation entry has valid data and should be included."""
     # Check if mutation has a valid name (not NaN, n.a., or -99)
     if not mutation.get("name") or str(mutation["name"]).lower() in [
         "nan",
@@ -736,10 +726,8 @@ def is_valid_mutation(mutation: Dict[str, Any]) -> bool:
     return False
 
 
-def clean_mutation_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Clean a single mutation detail entry by removing invalid values.
-    """
+def clean_mutation_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    """Clean a single mutation detail entry by removing invalid values."""
     cleaned = {}
     for key, value in detail.items():
         # Handle lists (like positiveFunctionalEvidence)
@@ -765,7 +753,7 @@ def clean_mutation_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
     return cleaned
 
 
-def process_mutations(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+def process_mutations(data: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Process and clean mutation data from a study entry.
     Returns only valid mutations with cleaned details.
@@ -800,10 +788,8 @@ def process_mutations(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     return processed_mutations
 
 
-def process_study_data(studies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Process full study data, cleaning mutations for each study.
-    """
+def process_study_data(studies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Process full study data, cleaning mutations for each study."""
     processed_studies = []
 
     for study in studies:
@@ -825,10 +811,8 @@ def process_study_data(studies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return processed_studies
 
 
-def merge_duplicate_mutations(mutations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Merge duplicate mutations in a study, combining their details.
-    """
+def merge_duplicate_mutations(mutations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge duplicate mutations in a study, combining their details."""
     mutation_map = {}
 
     for mutation in mutations:
@@ -848,10 +832,8 @@ def merge_duplicate_mutations(mutations: List[Dict[str, Any]]) -> List[Dict[str,
 
 
 # Usage example:
-def clean_study_mutations(input_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Clean and process mutation data for all studies.
-    """
+def clean_study_mutations(input_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Clean and process mutation data for all studies."""
     # Process all studies
     processed_data = process_study_data(input_data)
 

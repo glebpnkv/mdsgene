@@ -1,24 +1,31 @@
-import os
-import sys
-import time
 import json
+import logging
+import os
+import re
+import time
 import traceback
 from pathlib import Path
 from typing import Any
-from mdsgene.cache_utils import save_formatted_result
 
 # Use google.generativeai for Gemini interaction
+from google import genai
 from google.api_core import exceptions as google_exceptions
 from google.genai.types import Part
-from google import genai
 
+from mdsgene.cache_utils import save_formatted_result
 from mdsgene.internal.defines import NO_INFORMATION_LIST, DEFAULT_SAFETY_SETTINGS
+from mdsgene.logging_config import configure_logging
+
+# Get a logger for this module
+configure_logging()
+logger = logging.getLogger(__name__)
+
 
 # --- Configuration (Copied and adapted from GeminiProcessorLogic) ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL") # Or "gemini-1.5-pro", etc.
 DEFAULT_GENERATION_CONFIG = genai.types.GenerationConfig(
-    temperature=0.1, # Lower temperature for deterministic formatting
+    temperature=0.0, # Lower temperature for deterministic formatting
 )
 
 
@@ -27,9 +34,9 @@ class GeminiTextProcessor:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         model_name: str = DEFAULT_GEMINI_MODEL,
-        pmid: Optional[str] = None
+        pmid: str | None = None
     ):
         """
         Initializes the Gemini client for text operations.
@@ -47,16 +54,16 @@ class GeminiTextProcessor:
             self.model_name = model_name
             self.safety_settings = DEFAULT_SAFETY_SETTINGS
             self.generation_config = DEFAULT_GENERATION_CONFIG
-            print(f"GeminiTextProcessor client initialized for model '{model_name}'.")
+            logger.info(f"GeminiTextProcessor client initialized for model '{model_name}'.")
 
             self.pmid = pmid
             cache_dir = Path("cache") / pmid if pmid else Path("cache")
             cache_dir.mkdir(parents=True, exist_ok=True)
             self._format_cache_path = cache_dir / "formatted_answer_cache.json"
-            self._format_cache: Dict[str, Dict[str, str]] = {}
+            self._format_cache: dict[str, dict[str, str]] = {}
 
         except Exception as e:
-            print(f"Error initializing GeminiTextProcessor client: {e}", file=sys.stderr)
+            logger.error(f"Error initializing GeminiTextProcessor client: {e}")
             raise
 
     def load_from_cache(self, cache_id: str) -> dict[str, str] | None:
@@ -70,7 +77,7 @@ class GeminiTextProcessor:
             with open(self._format_cache_path, "w", encoding="utf-8") as f:
                 json.dump(self._format_cache, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"ERROR saving format cache: {e}")
+            logger.error(f"Error saving format cache: {e}")
 
     def _make_gemini_request(self, prompt_parts: list[Any], task_description: str) -> str | None:
         """Makes a request to the Gemini API using the client with retry logic (Text only)."""
@@ -82,7 +89,7 @@ class GeminiTextProcessor:
 
         for attempt in range(max_retries):
             try:
-                print(f"Attempting Gemini request ({task_description})... (Attempt {attempt + 1}/{max_retries})")
+                logger.info(f"Attempting Gemini request ({task_description})... (Attempt {attempt + 1}/{max_retries})")
                 response = self.client.models.generate_content(
                     model=f"models/{self.model_name}",
                     contents=contents,
@@ -91,68 +98,62 @@ class GeminiTextProcessor:
                 )
 
                 if hasattr(response, 'text'):
-                     print(f"  Gemini request successful ({task_description}).")
-                     return response.text.strip()
+                    logger.info(f"Gemini request successful ({task_description}).")
+                    return response.text.strip()
                 else:
                      # Handle cases like blocked prompts, etc.
                      feedback = getattr(response, 'prompt_feedback', 'No feedback available')
-                     print(
-                         f"WARNING: Gemini response for '{task_description}' has no text. Feedback: {feedback}",
-                         file=sys.stderr
-                     )
+                     logger.warning(f"Gemini response for '{task_description}' has no text. Feedback: {feedback}")
                      # Check for blocked content
                      if hasattr(feedback, 'block_reason') and feedback.block_reason:
-                         print(f"  REASON: Blocked due to {feedback.block_reason}")
+                         logger.warning(f"REASON: Blocked due to {feedback.block_reason}")
                      return None # Or raise an error, depending on desired behavior
 
             except google_exceptions.ResourceExhausted as e:
-                print(f"WARNING: Gemini API quota exceeded: {e}. Retrying in {delay}s...", file=sys.stderr)
+                logger.warning(f"Gemini API quota exceeded: {e}. Retrying in {delay}s...")
                 time.sleep(delay)
                 delay *= 2
             except google_exceptions.ServiceUnavailable as e:
-                 print(f"WARNING: Gemini service unavailable: {e}. Retrying in {delay}s...", file=sys.stderr)
-                 time.sleep(delay)
-                 delay *= 2
+                logger.warning(f"Gemini service unavailable: {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+                delay *= 2
             except google_exceptions.InternalServerError as e:
-                 print(f"WARNING: Gemini internal server error: {e}. Retrying in {delay}s...", file=sys.stderr)
-                 time.sleep(delay)
-                 delay *= 2
+                logger.warning(f"Gemini internal server error: {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+                delay *= 2
             except google_exceptions.InvalidArgument as e:
-                 print(f"ERROR: Invalid argument for Gemini API call ({task_description}): {e}", file=sys.stderr)
-                 print(
-                     f"Check if model name '{self.model_name}' is valid and correctly formatted ('models/...') "
-                     f"for the client API."
+                logger.error(f"Invalid argument for Gemini API call ({task_description}): {e}")
+                logger.error(
+                    f"Check if model name '{self.model_name}' is valid and correctly formatted ('models/...') "
+                                     f"for the client API."
                  )
-                 return None
+                return None
             except Exception as e:
-                print(f"ERROR: Unhandled exception during Gemini API call ({task_description}): {e}", file=sys.stderr)
+                logger.error(f"Unhandled exception during Gemini API call ({task_description}): {e}")
                 traceback.print_exc()
                 # Maybe retry once more for generic errors? Or just fail.
                 if attempt < max_retries - 1:
-                    print(f"Retrying generic error in {delay}s...")
+                    logger.info(f"Retrying generic error in {delay}s...")
                     time.sleep(delay)
                     delay *= 2
                 else:
                     return None # Fail after retries
 
-        print(f"ERROR: Gemini request failed after {max_retries} attempts ({task_description}).", file=sys.stderr)
+        logger.error(f"Gemini request failed after {max_retries} attempts ({task_description}).")
         return None
-
 
     def format_answer(self, raw_answer: str | None, strategy: str) -> tuple[str, str | None]:
         """
         Uses Gemini to format a raw answer according to a specific strategy.
         (Code exactly as in GeminiProcessorLogic.format_answer, including the prompt)
         """
-        print("Formatting answer using GeminiTextProcessor...")
+        logger.info("Formatting answer using GeminiTextProcessor...")
         if not raw_answer or raw_answer.lower() in NO_INFORMATION_LIST:
-            print(f"Raw answer indicates missing info ('{raw_answer}'). Returning -99.")
+            logger.info(f"Raw answer indicates missing info ('{raw_answer}'). Returning -99.")
             return "-99", None
         if "error" in raw_answer.lower() or "failed" in raw_answer.lower():
-             print(f"Raw answer indicates error ('{raw_answer[:50]}...'). Returning -99.")
-             return "-99", None
-
-
+            logger.info(f"Raw answer indicates error ('{raw_answer[:50]}...'). Returning -99.")
+            return "-99", None
 
         formatting_prompt = f"""
         Given the following raw text extracted from a document and a desired formatting strategy, reformat the text.
@@ -192,15 +193,12 @@ class GeminiTextProcessor:
         formatted_answer = self._make_gemini_request([formatting_prompt], "formatting")
 
         if formatted_answer is None:
-            print(
-                f"ERROR: Gemini formatting failed for raw answer: '{raw_answer[:50]}...'. Returning -99.",
-                file=sys.stderr
-            )
+            logger.error(f"Gemini formatting failed for raw answer: '{raw_answer[:50]}...'. Returning -99.")
             # Return the original raw_answer as context even on failure
             return "-99", raw_answer
 
         if not formatted_answer or not formatted_answer.strip():
-            print("ERROR: Empty string returned from Gemini.")
+            logger.error("Empty string returned from Gemini.")
             return "-99", raw_answer
 
         # Post-processing cleanup (same as before)
@@ -217,9 +215,9 @@ class GeminiTextProcessor:
                 break
 
         if not formatted_answer or formatted_answer.lower() in NO_INFORMATION_LIST:
-             print(f"  Formatted answer resulted in an 'unknown' value ('{formatted_answer}'). Returning -99.")
-             # Return the original raw_answer as context
-             return "-99", raw_answer
+            logger.info(f"Formatted answer resulted in an 'unknown' value ('{formatted_answer}'). Returning -99.")
+            # Return the original raw_answer as context
+            return "-99", raw_answer
 
         if self.pmid:
             text_for_parse = formatted_answer.strip()
@@ -240,8 +238,9 @@ class GeminiTextProcessor:
                     parsed_json,
                 )
             else:
-                print("[Cache] Formatted result is not JSON. Skipping cache save.")
+                logger.info("[Cache] Formatted result is not JSON. Skipping cache save.")
 
-        print(f"  Formatted result: '{formatted_answer}'")
+        logger.info(f"Formatted result: '{formatted_answer}'")
+
         # Return the formatted answer and the original raw_answer as context
         return formatted_answer, raw_answer

@@ -1,12 +1,17 @@
+import logging
 import traceback
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
-from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
 from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
+from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
 from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
 
-def process_pdf_file(pdf_filepath: str) -> Dict[str, Any]:
+# Get a logger for this module
+logger = logging.getLogger(__name__)
+
+
+def process_pdf_file(pdf_filepath: str) -> dict[str, Any]:
     """
     Process a PDF file and extract information using agents.
     
@@ -25,13 +30,13 @@ def process_pdf_file(pdf_filepath: str) -> Dict[str, Any]:
         ValueError: If the PDF file is not found or other validation errors
         Exception: For other processing errors
     """
-    # Fix path if it has duplicated filename
+    # Fix path if it has duplicated filenames
     pdf_path = Path(pdf_filepath)
     if str(pdf_path.parent.name) == pdf_path.name:
         # Path has duplicated filename, fix it
         corrected_path = pdf_path.parent
         pdf_filepath = str(corrected_path)
-        print(f"Corrected duplicated path to: {pdf_filepath}")
+        logger.info(f"Corrected duplicated path to: {pdf_filepath}")
     
     # Validate the PDF filepath
     if not Path(pdf_filepath).exists():
@@ -59,7 +64,7 @@ def process_pdf_file(pdf_filepath: str) -> Dict[str, Any]:
         pmid = publication_final_state.get("pmid")
         publication_details = publication_final_state.get("publication_details", {})
         
-        print(f"Publication details extracted. PMID: {pmid}")
+        logger.info(f"Publication details extracted. PMID: {pmid}")
         
         # Step 2: Extract patient identifiers using PatientIdentifiersAgent
         patient_agent = PatientIdentifiersAgent(pmid)
@@ -79,7 +84,7 @@ def process_pdf_file(pdf_filepath: str) -> Dict[str, Any]:
             print(f"Patient identifiers extracted: {len(patient_identifiers)} patients")
         except ValueError as e:
             # This will catch the exception thrown when patient identifiers are not found in cache
-            print(f"WARNING: {e}")
+            logger.warning(f"WARNING: {e}")
             patient_identifiers = []
         
         # Step 3: Process questions for each patient using QuestionsProcessingAgent
@@ -103,9 +108,9 @@ def process_pdf_file(pdf_filepath: str) -> Dict[str, Any]:
             try:
                 questions_final_state = questions_agent.run(questions_initial_state)
                 patient_answers = questions_final_state.get("patient_answers", [])
-                print(f"Patient questions processed: {len(patient_answers)} patient data rows")
+                logger.info(f"Patient questions processed: {len(patient_answers)} patient data rows")
             except Exception as e:
-                print(f"ERROR processing questions: {e}")
+                logger.error(f"ERROR processing questions: {e}")
                 patient_answers = []
         else:
             patient_answers = []
@@ -132,16 +137,18 @@ def process_pdf_file(pdf_filepath: str) -> Dict[str, Any]:
                 # This is a dictionary-style message
                 results["messages"].append(message)
         
-        print("\n=== Results ===")
-        print(f"PDF: {results['pdf_filename']}")
-        print(f"Publication Details: {results['publication_details']}")
-        print(f"PMID: {results['pmid']}")
-        print(f"Patient Identifiers: {len(results['patient_identifiers'])} patients")
-        print(f"Patient Answers: {len(results['patient_answers'])} rows")
-        
+        logger.info(
+            f"\n=== Results === \n"
+            f"PDF: {results['pdf_filename']}\n"
+            f"Publication Details: {results['publication_details']}\n"
+            f"PMID: {results['pmid']}\n"
+            f"Patient Identifiers: {len(results['patient_identifiers'])} patients\n"
+            f"Patient Answers: {len(results['patient_answers'])} rows\n"
+        )
+
         return results
         
     except Exception as e:
-        print(f"ERROR: An unexpected error occurred: {e}")
+        logger.error(f"ERROR: An unexpected error occurred: {e}")
         traceback.print_exc()
         raise

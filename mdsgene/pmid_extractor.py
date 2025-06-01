@@ -1,6 +1,11 @@
 # pmid_extractor.py
-import requests
+import logging
 import urllib.parse
+
+import requests
+
+# Get a logger for this module
+logger = logging.getLogger(__name__)
 
 
 class PmidExtractor:
@@ -19,7 +24,7 @@ class PmidExtractor:
         :return: PMID as a string or None if not found.
         """
         if not title:
-            print("Title is required to search PubMed.")
+            logger.error("Title is required to search PubMed.")
             return None
 
         # Construct search query
@@ -30,7 +35,7 @@ class PmidExtractor:
             query_parts.append(year)
 
         search_query = " ".join(query_parts)
-        print(f"Prepared PubMed search query: {search_query}")
+        logger.info(f"Prepared PubMed search query: {search_query}")
 
         # Encode and prepare API URL
         encoded_query = urllib.parse.quote(search_query)
@@ -48,7 +53,7 @@ class PmidExtractor:
             return pmids[0] if pmids else None
 
         except Exception as e:
-            print(f"Error querying PubMed: {e}")
+            logger.error(f"Error querying PubMed: {e}")
             return None
 
 

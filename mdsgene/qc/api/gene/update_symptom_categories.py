@@ -1,13 +1,13 @@
 import json
-import pandas as pd
 import os
-from typing import Dict, Set, Tuple
-from qc.logging_config import logger
-from qc.api.gene.utils import get_cached_dataframe
-from qc.config import properties_directory
+from typing import Set
+
+from mdsgene.qc.api.gene.utils import get_cached_dataframe
+from mdsgene.qc.config import properties_directory
+from mdsgene.qc.logging_config import logger
 
 
-def get_or_create_categories() -> Dict:
+def get_or_create_categories() -> dict:
     """Creates the basic structure of categories."""
     return {
         "Development in childhood/adolescence": {},
@@ -42,14 +42,12 @@ def update_symptom_categories(file_path: str, properties_dir: str = None) -> Non
 
     os.makedirs(properties_dir, exist_ok=True)
 
-    disease_gene_symptoms: Dict[str, Set[Tuple[str, str]]] = {}
+    disease_gene_symptoms: dict[str, Set[tuple[str, str]]] = {}
 
     try:
         df = get_cached_dataframe(file_path)
         logger.info(f"Processing file: {os.path.basename(file_path)}")
-        print(f"\nProcessing file: {os.path.basename(file_path)}")
         logger.info(f"Initial DataFrame shape: {df.shape}")
-        print(f"Initial DataFrame shape: {df.shape}")
 
         # Filter rows with "mdsgene_decision" == "IN"
         df = df[df["mdsgene_decision"] == "IN"]
@@ -70,7 +68,6 @@ def update_symptom_categories(file_path: str, properties_dir: str = None) -> Non
                     continue
 
                 disease_gene_key = f"{disease}_{gene}"
-                file_id = f"symptom_categories_{disease}_{gene}.json"
 
                 if disease_gene_key not in disease_gene_symptoms:
                     disease_gene_symptoms[disease_gene_key] = set()
@@ -94,7 +91,6 @@ def update_symptom_categories(file_path: str, properties_dir: str = None) -> Non
             with open(file_path, 'r', encoding='utf-8') as f:
                 categories = json.load(f)
             logger.info(f"Existing categories loaded from: {file_path}")
-            print(f"Existing categories loaded from: {file_path}")
 
         for symptom_name, display_name in symptoms:
             if not any(symptom_name in cat for cat in categories.values()):
@@ -104,11 +100,8 @@ def update_symptom_categories(file_path: str, properties_dir: str = None) -> Non
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(categories, f, indent=2, ensure_ascii=False)
             logger.info(f"Updated categories file: {file_path}; Total symptoms: {len(symptoms)}")
-            print(f"Updated categories file: {file_path}")
-            print(f"Total symptoms: {len(symptoms)}")
         except Exception as e:
             logger.error(f"Failed to write JSON file {file_path}: {e}")
-            print(f"Failed to write JSON file {file_path}: {e}")
 
 
 if __name__ == "__main__":
@@ -121,4 +114,3 @@ if __name__ == "__main__":
     excel_file_path = sys.argv[1]
     update_symptom_categories(excel_file_path)
     logger.info(f"Finished updating symptom categories for file: {excel_file_path}")
-    print(f"Finished updating symptom categories for file: {excel_file_path}")

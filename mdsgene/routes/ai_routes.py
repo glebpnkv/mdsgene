@@ -1,28 +1,55 @@
-import os
 import json
+import os
 import shutil
-import zipfile
 import threading
-import pandas as pd
-from typing import Any, Dict, Optional
-from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Query
-from pathlib import Path
-from uuid import uuid4
-from fastapi.responses import FileResponse
+import zipfile
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
-from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
-from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
-from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
+import pandas as pd
+from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Query
+from fastapi.responses import FileResponse
+
 from mdsgene.agents.base_agent import CACHE_DIR
+from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
+from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
+from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
 from mdsgene.cache_utils import delete_document_and_all_related_data
-from mdsgene.document_processor import DocumentProcessor
+from mdsgene.custom_processors import CustomProcessors
+from mdsgene.internal.defines import MOTOR_TERM_LIST, NON_MOTOR_TERM_LIST
+from mdsgene.qc.api.gene.utils import EXPECTED_HEADERS
+from mdsgene.qc.config import properties_directory, excel_folder
 from mdsgene.vector_store_client import VectorStoreClient
 from mdsgene.workflows.pdf_processing import process_pdf_file
+
+# Ensure these directories exist
+EXCEL_FOLDER = Path(excel_folder)
+PROPERTIES_DIRECTORY = Path(properties_directory)
+EXCEL_FOLDER.mkdir(exist_ok=True)
+PROPERTIES_DIRECTORY.mkdir(exist_ok=True)
 
 # Path to the PMID cache file
 PMID_CACHE_PATH = os.path.join("cache", "pmid_cache.json")
 
+# Get paths from environment variables with default fallback
+LOCAL_DB_PATH = os.getenv("LOCAL_DB_PATH", r".\vector_store\faiss_index")
+VECTOR_STORE_DIR = LOCAL_DB_PATH
+TEMP_UPLOAD_DIR = os.getenv("TEMP_UPLOAD_DIR", r".\temp_uploads")
+# Create temp upload directory if needed
+os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
+
+# Environment variable to control vector store usage
+USE_VECTOR_STORE = os.getenv("USE_VECTOR_STORE", "false").lower() in ("1", "true", "yes")
+
+# In-memory storage for tracking PDF analysis progress
+# In a production environment, this should be replaced with a database
+pdf_analysis_progress: Dict[str, Dict[str, float]] = {}
+
+# In-memory storage for tracking ZIP analysis progress
+# In a production environment, this should be replaced with a database
+zip_analysis_progress: Dict[str, Dict[str, Any]] = {}
 
 def get_pmid_for_filename(filename: str) -> str | None:
     """
@@ -46,15 +73,6 @@ def get_pmid_for_filename(filename: str) -> str | None:
 
     return None
 
-# Получение путей из переменных окружения с fallback по умолчанию
-LOCAL_DB_PATH = os.getenv("LOCAL_DB_PATH", r".\vector_store\faiss_index")
-VECTOR_STORE_DIR = LOCAL_DB_PATH
-TEMP_UPLOAD_DIR = os.getenv("TEMP_UPLOAD_DIR", r".\temp_uploads")
-# Создаем каталог для временных загрузок, если нужно
-os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
-
-# Environment variable to control vector store usage
-USE_VECTOR_STORE = os.getenv("USE_VECTOR_STORE", "false").lower() in ("1", "true", "yes")
 
 def get_file_vector_store_dir(task_id: str, filename: str) -> str:
     """
@@ -72,40 +90,6 @@ def get_file_vector_store_dir(task_id: str, filename: str) -> str:
     file_st_dir.mkdir(parents=True, exist_ok=True)
     return str(file_st_dir)
 
-def initialize_document_processor(storage_path: str = None, use_vector_store: bool = None):
-    """
-    Initialize DocumentProcessor with FAISS index check.
-    If index doesn't exist, create an empty one.
-
-    Args:
-        storage_path: Path to the vector store directory
-        use_vector_store: Override for USE_VECTOR_STORE environment variable
-
-    Returns:
-        Initialized DocumentProcessor
-    """
-    # Import here to avoid circular imports
-    from mdsgene.vector_store_client import VectorStoreClient
-
-    # Use the provided value or fall back to the environment variable
-    use_vs = USE_VECTOR_STORE if use_vector_store is None else use_vector_store
-
-    # If vector store is disabled, return a processor without it
-    if not use_vs or storage_path is None:
-        print("Vector store is disabled. Initializing DocumentProcessor without vector store.")
-        return DocumentProcessor(storage_path=None, use_vector_store=False)
-
-    # Otherwise, initialize with vector store
-    # Create a vector store client
-    vector_store_client = VectorStoreClient()
-
-    # Create the vector store if it doesn't exist
-    vector_store_client.create_vector_store(storage_path)
-
-    # Now we can safely load
-    # For backward compatibility, still return a DocumentProcessor
-    # but it will use the vector store service internally
-    return DocumentProcessor(storage_path=storage_path, use_vector_store=True)
 
 def ensure_patient_identifiers_cached(filename: str, file_path: str):
     """
@@ -127,13 +111,6 @@ def ensure_patient_identifiers_cached(filename: str, file_path: str):
     }
     _ = agent.run(initial_state)
 
-# In-memory storage for tracking PDF analysis progress
-# In a production environment, this should be replaced with a database
-pdf_analysis_progress: Dict[str, Dict[str, float]] = {}
-
-# In-memory storage for tracking ZIP analysis progress
-# In a production environment, this should be replaced with a database
-zip_analysis_progress: Dict[str, Dict[str, Any]] = {}
 
 def convert_word_to_text(word_path: str) -> str:
     """
@@ -159,7 +136,8 @@ def convert_word_to_text(word_path: str) -> str:
         print(f"Error converting Word document to text: {e}")
         return f"ERROR: Could not extract text from {word_path}: {str(e)}"
 
-def process_text_as_pdf(text: str, original_path: str) -> Dict[str, Any]:
+
+def process_text_as_pdf(text: str, original_path: str) -> dict[str, Any]:
     """
     Process text content as if it were extracted from a PDF.
 
@@ -170,9 +148,6 @@ def process_text_as_pdf(text: str, original_path: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing the processing results
     """
-    from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
-    from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
-    from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
 
     try:
         # Create a temporary file with the text content
@@ -245,6 +220,7 @@ def process_text_as_pdf(text: str, original_path: str) -> Dict[str, Any]:
             "filename": os.path.basename(original_path),
             "error": str(e)
         }
+
 
 def process_zip_archive(task_id: str, zip_path: str):
     """
@@ -443,7 +419,6 @@ def process_zip_archive(task_id: str, zip_path: str):
             print(f"Error during cleanup: {cleanup_error}")
 
 
-
 router = APIRouter()
 
 @router.post("/file/upload_zip")
@@ -489,6 +464,7 @@ async def upload_zip(file: UploadFile = File(...)):
 
     return {"task_id": task_id}
 
+
 @router.get("/file/zip_analysis_status")
 async def get_zip_analysis_status(task_id: str = Query(..., description="Task ID from upload_zip")):
     """
@@ -508,6 +484,7 @@ async def get_zip_analysis_status(task_id: str = Query(..., description="Task ID
 
     # Return the current status
     return zip_analysis_progress[task_id]
+
 
 @router.get("/file/download_zip_results")
 async def download_zip_results(task_id: str = Query(..., description="Task ID from upload_zip")):
@@ -548,15 +525,16 @@ async def download_zip_results(task_id: str = Query(..., description="Task ID fr
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
+
 @router.post("/gene/upload_pdf")
 async def upload_pdf(file: UploadFile = File(...)):
     if not file.content_type == "application/pdf":
         raise HTTPException(status_code=400, detail="Недопустимый тип файла")
 
-    # Временный путь файла
+    # Temporary file path
     temp_file_path = os.path.join(TEMP_UPLOAD_DIR, file.filename)
 
-    # Сохраняем файл временно - без copyfileobj
+    # Save file temporarily - without copyfileobj
     content = await file.read()
     with open(temp_file_path, "wb") as buffer:
         buffer.write(content)
@@ -592,7 +570,6 @@ async def upload_pdf_for_processing(file: UploadFile = File(...)):
         await file.close()  # Ensure file is closed
 
     return {"filename": file.filename, "message": "File uploaded successfully, ready for processing."}
-
 
 
 @router.get("/file/patient_identifiers")
@@ -647,6 +624,7 @@ async def get_patient_identifiers(filename: str = Query(..., description="Filena
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
 
 @router.get("/file/publication_details")
 async def get_publication_details(filename: str = Query(..., description="Filename of the uploaded PDF")):
@@ -778,7 +756,6 @@ async def process_patient_questions(filename: str = Query(..., description="File
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 
-
 @router.post("/file/update_publication_details")
 async def update_publication_details(
     filename: str = Body(..., description="Filename of the uploaded PDF"),
@@ -831,7 +808,6 @@ async def update_publication_details(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error updating publication details: {str(e)}")
-
 
 
 @router.post("/file/update_patient_identifier")
@@ -922,91 +898,6 @@ async def update_patient_identifier(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error updating patient identifier: {str(e)}")
-
-    @router.delete("/file/delete_patient_identifier")
-    async def delete_patient_identifier(
-            filename: str = Body(..., description="Filename of the uploaded PDF"),
-            patient_id: str = Body(..., description="Patient identifier to delete"),
-            family_id: Optional[str] = Body(None, description="Family identifier")
-    ):
-        """
-        Delete a patient identifier for a previously uploaded PDF file.
-
-        This endpoint removes a specific patient identifier from the cache.
-        It requires both the patient ID and optionally the family ID to ensure
-        the correct patient is deleted.
-
-        Args:
-            filename: The name of the PDF file
-            patient_id: The patient identifier to delete
-            family_id: The family identifier (optional)
-
-        Returns:
-            Confirmation of deletion and updated count
-        """
-        # Construct the full path to the uploaded file
-        file_path = os.path.join(TEMP_UPLOAD_DIR, filename)
-
-        # Check if the file exists
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail=f"File '{filename}' not found")
-
-        try:
-            # Initialize the patient identifiers agent to access its cache
-            agent = PatientIdentifiersAgent()
-
-            # Load the current cache
-            cache = agent.load_cache()
-
-            # Get the patient identifiers list from cache
-            patient_cache_key = agent.patient_cache_key
-            patient_identifiers = cache.get(patient_cache_key, [])
-
-            # Check if patient identifier is not a list
-            if not isinstance(patient_identifiers, list):
-                raise HTTPException(status_code=400, detail="Patient identifiers cache is not in the expected format")
-
-            # Find and remove the patient
-            original_count = len(patient_identifiers)
-            new_patient_identifiers = []
-
-            for entry in patient_identifiers:
-                # Skip the patient we want to delete
-                if (entry.get("patient") == patient_id and
-                        (family_id is None or entry.get("family") == family_id)):
-                    continue
-                new_patient_identifiers.append(entry)
-
-            new_count = len(new_patient_identifiers)
-
-            # If no patient was removed, return an error
-            if original_count == new_count:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Patient with ID '{patient_id}' and family ID '{family_id}' not found"
-                )
-
-            # Save updated patient identifiers list back to cache
-            cache[patient_cache_key] = new_patient_identifiers
-            agent.save_cache(cache)
-
-            return {
-                "filename": filename,
-                "patient_id": patient_id,
-                "family_id": family_id,
-                "message": "Patient identifier deleted successfully",
-                "deleted_count": original_count - new_count,
-                "patient_identifiers_count": new_count
-            }
-        except HTTPException:
-            # Re-raise HTTP exceptions
-            raise
-        except Exception as e:
-            # Log the error for debugging
-            print(f"Error deleting patient identifier for {filename}: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Error deleting patient identifier: {str(e)}")
 
 
 @router.post("/file/add_patient_identifier")
@@ -1181,6 +1072,7 @@ async def delete_patient_identifier(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error deleting patient identifier: {str(e)}")
 
+
 @router.get("/gene/mapping_data")
 async def get_mapping_data():
     """
@@ -1316,7 +1208,10 @@ async def manage_mapping_data(
 
 @router.get("/cache/questions")
 async def get_cached_questions(
-    pmid: Optional[str] = Query(None, description="PMID of the document. Leave empty to retrieve all cached questions.")
+    pmid: Optional[str] = Query(
+        default=None, 
+        description="PMID of the document. Leave empty to retrieve all cached questions."
+    )
 ):
     """
     Retrieve cached questions for a specific PMID or all PMIDs.
@@ -1382,6 +1277,7 @@ async def get_cached_questions(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error retrieving cached questions: {str(e)}")
 
+
 @router.get("/cache/response")
 async def get_cached_response(
     pmid: str = Query(..., description="PMID of the document"),
@@ -1432,6 +1328,7 @@ async def get_cached_response(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error retrieving cached response: {str(e)}")
+
 
 @router.delete("/cache")
 async def clear_cache(
@@ -1576,11 +1473,11 @@ async def clear_cache(
 @router.get("/documents")
 def get_documents():
     """
-    Возвращает список документов из pmid_cache.json.
-    Если файла нет, возвращается пустой список.
+    Returns a list of documents from pmid_cache.json.
+    If the file does not exist, an empty list is returned.
 
     Returns:
-        Список документов.
+        A list of documents.
     """
     try:
         if os.path.exists(PMID_CACHE_PATH):
@@ -1597,7 +1494,7 @@ def get_documents():
 
             return documents
         else:
-            # Если файла нет, просто возвращаем пустой список
+            # If the file does not exist, return an empty list
             return []
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1610,7 +1507,7 @@ async def delete_document_and_cache(pdf_filename: str, pmid: str):
         vector_store_client = VectorStoreClient(service_url="http://localhost:8002")
 
         storage_path = os.getenv("VECTOR_STORE_PATH")
-        # Вызов существующей функции для полной очистки
+        # Call the existing function for a full cleanup
         delete_document_and_all_related_data(
             pdf_filename=pdf_filename,
             pmid=pmid,
@@ -1619,34 +1516,21 @@ async def delete_document_and_cache(pdf_filename: str, pmid: str):
             pmid_cache_path=str(PMID_CACHE_PATH),
             vector_store_client=vector_store_client
         )
-        return {"message": f"Документ {pdf_filename} и связанные данные успешно удалены."}
+        return {"message": f"Document {pdf_filename} and related data successfully deleted."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-import numpy as np
-from typing import List, Dict, Any, Optional
-from pathlib import Path
-from fastapi import HTTPException
-from qc.api.gene.utils import EXPECTED_HEADERS
-from qc.config import properties_directory, excel_folder
-from mdsgene.custom_processors import CustomProcessors
-
-# Ensure these directories exist
-EXCEL_FOLDER = Path(excel_folder)
-PROPERTIES_DIRECTORY = Path(properties_directory)
-EXCEL_FOLDER.mkdir(exist_ok=True)
-PROPERTIES_DIRECTORY.mkdir(exist_ok=True)
-
-# Helper to find excel file
 def find_excel_file_for_gene_disease(gene_name: str, disease_abbrev: str, excel_dir: Path) -> Optional[Path]:
+    """Helper to find excel files"""
     pattern = f"{gene_name}-{disease_abbrev}"
     for f in excel_dir.glob(f"{pattern}*.xlsx"):
         return f  # Return the first match
     return None
 
-# Helper to prepare a row for the Excel sheet
+
 def prepare_excel_row(patient_data: Dict[str, Any], expected_headers: set) -> Dict[str, Any]:
+    """Helper to prepare a row for the Excel sheet"""
     row_data = {}
     # Map input keys to expected headers (case-insensitive for input keys)
     expected_headers_lower_map = {h.lower(): h for h in expected_headers}
@@ -1664,8 +1548,9 @@ def prepare_excel_row(patient_data: Dict[str, Any], expected_headers: set) -> Di
             row_data[header] = -99  # Or None / np.nan depending on type, but task specifies -99
     return row_data
 
-# Helper to update or create symptom category JSON
+
 def update_symptom_json(gene_name: str, disease_abbrev: str, patient_data: Dict[str, Any], properties_dir: Path):
+    """Helper to update or create symptom category JSON."""
     symptom_file_name = f"symptom_categories_{disease_abbrev}_{gene_name}.json"
     symptom_file_path = properties_dir / symptom_file_name
 
@@ -1719,7 +1604,10 @@ def update_symptom_json(gene_name: str, disease_abbrev: str, patient_data: Dict[
     # Process other symptom fields in patient_data
     for key, value in patient_data.items():
         key_lower = key.lower()
-        if ("_sympt" in key_lower or "_hp:" in key_lower) and key not in motor_symptoms and key not in non_motor_symptoms:
+        if (
+            ("_sympt" in key_lower or "_hp:" in key_lower)
+            and key not in motor_symptoms and key not in non_motor_symptoms
+        ):
             # Check if it's already in any category
             found = False
             for category in ["Motor signs and symptoms", "Non-motor signs and symptoms"]:
@@ -1729,10 +1617,10 @@ def update_symptom_json(gene_name: str, disease_abbrev: str, patient_data: Dict[
 
             if not found:
                 # Try to categorize based on key name
-                if any(motor_term in key_lower for motor_term in ["motor", "tremor", "rigid", "bradykinesia", "postural", "gait", "dyskinesia", "dystonia"]):
+                if any(motor_term in key_lower for motor_term in MOTOR_TERM_LIST):
                     if key not in current_symptoms_data["Motor signs and symptoms"]:
                         motor_symptoms[key] = key
-                elif any(non_motor_term in key_lower for non_motor_term in ["cognitive", "depression", "anxiety", "sleep", "psychotic", "autonomic", "olfaction"]):
+                elif any(non_motor_term in key_lower for non_motor_term in NON_MOTOR_TERM_LIST):
                     if key not in current_symptoms_data["Non-motor signs and symptoms"]:
                         non_motor_symptoms[key] = key
                 else:
@@ -1779,13 +1667,13 @@ async def process_to_excel(data: List[Dict[str, Any]] = Body(...)):
 
     processed_rows = []
 
-    #remove from data column "Author_year" because there is another column with the name Author, year
+    # Remove from data column "Author_year" because there is another column with the name Author, year
     for patient in data:
         if 'Author_year' in patient:
             del patient['Author_year']
 
 
-    # Обработка каждой строки отдельно
+    # Processing lines one at a time
     for patient in data:
         row = {key: '-99' for key in EXPECTED_HEADERS}
 
@@ -1793,13 +1681,18 @@ async def process_to_excel(data: List[Dict[str, Any]] = Body(...)):
         if hasattr(CustomProcessors, 'disease_abbrev'):
             # Call the processor method to process the value
             processor_method = getattr(CustomProcessors, 'disease_abbrev')
-            update_symptom_json(patient['gene1'], processor_method(patient['disease_abbrev']), patient, PROPERTIES_DIRECTORY)
+            update_symptom_json(
+                gene_name=patient['gene1'],
+                disease_abbrev=processor_method(patient['disease_abbrev']),
+                patient_data=patient,
+                properties_dir=PROPERTIES_DIRECTORY
+            )
 
         row['PMID'] = patient.get('PMID', '-99')
         row['family_ID'] = patient.get('Family_ID', '-99')
         row['individual_ID'] = patient.get('individual_ID', '-99')
 
-        # Динамическое заполнение всех полей из patient
+        # Dynamically fill all fields from patient
         for field, value in patient.items():
             if field in EXPECTED_HEADERS:
                 # Check if this field has a custom processor
@@ -1817,7 +1710,7 @@ async def process_to_excel(data: List[Dict[str, Any]] = Body(...)):
                     # No custom processor, use the value as is
                     row[field] = value
 
-        # Обработка motor_symptoms и non_motor_symptoms
+        # Processing motor_symptoms и non_motor_symptoms
         for symptom_type in ['motor_symptoms', 'non_motor_symptoms']:
             symptoms_data = patient.get(symptom_type, '')
             if symptoms_data and symptoms_data != '-99_NO_ANSWER':
@@ -1833,21 +1726,21 @@ async def process_to_excel(data: List[Dict[str, Any]] = Body(...)):
 
         processed_rows.append(row)
 
-    # Сохранение данных в Excel и JSON с симптомами
+    # Save data to Excel and JSON with symptoms
     try:
         df_new_rows = pd.DataFrame(processed_rows)
 
-        # Используем данные из первой строки для имени файла
+        # Use data from the first row for filename 
         gene_name = processed_rows[0].get('gene1', 'gene_unknown')
         disease_abbrev = processed_rows[0].get('disease_abbrev', 'disease_unknown')
 
-        # add timestamp to filename and build prefix without timestamp
+        # Add timestamp to filename and build prefix without timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_prefix = f"{gene_name}-{disease_abbrev}_auto_created"
         excel_file_name = f"{file_prefix}-{timestamp}.xlsx"
         excel_path = EXCEL_FOLDER / excel_file_name
 
-        # Remove any existing Excel files with the same prefix
+        # Remove any existing Excel files with the same prefix 
         for existing_file in EXCEL_FOLDER.glob(f"{file_prefix}-*.xlsx"):
             try:
                 existing_file.unlink()
@@ -1886,7 +1779,7 @@ def generate_gene_url(data):
         return "Error: No data provided"
 
     try:
-        # Get base_url from environment variable, with a fallback value
+        # Get base_url from the environment variable, with a fallback value
         base_url = os.environ.get("MDSGENE_BASE_URL", "http://localhost")
 
         gene_disease_pairs = {}

@@ -1,10 +1,10 @@
-from typing import List, Dict, Any, Optional, final
-from pydantic import BaseModel
 import json
 import os
-from qc.logging_config import logger
-from qc.api.gene.list_genes import get_file_id_from_disease_gene
-from qc.config import properties_directory
+
+from pydantic import BaseModel
+
+from mdsgene.qc.config import properties_directory
+from mdsgene.qc.logging_config import logger
 
 
 class SymptomOrder(BaseModel):
@@ -14,19 +14,19 @@ class SymptomOrder(BaseModel):
     order: int
 
 
-def update_symptom_order(symptoms: List[SymptomOrder]) -> bool:
+def update_symptom_order(symptoms: list[SymptomOrder]) -> bool:
     """
-    Обновляет порядок симптомов в JSON файле.
+    Updates the order of symptoms in the JSON file.
     """
     try:
         if not symptoms:
             return True
 
-        # Используем имя файла из первого симптома, так как файл один
+        # Using file name from the first symptom as there is only one file
         file_name = symptoms[0].geneName
         json_file = os.path.join(properties_directory, file_name)
 
-        # Читаем текущее содержимое файла
+        # Read current file content
         try:
             with open(json_file, 'r') as file:
                 current_data = json.load(file)
@@ -34,21 +34,21 @@ def update_symptom_order(symptoms: List[SymptomOrder]) -> bool:
             logger.error(f"File not found: {json_file}")
             return False
 
-        # Создаем новую структуру данных
+        # Create new data structure
         updated_data = {category: {} for category in current_data.keys()}
 
-        # Создаем маппинг старых значений для симптомов
+        # Create mapping of old values for symptoms
         symptom_values = {}
         for category, symptoms_dict in current_data.items():
             for symptom_name, value in symptoms_dict.items():
                 symptom_values[symptom_name] = value
 
-        # Обрабатываем симптомы с заданным порядком
+        # Process symptoms with specified order
         symptoms_processed = set()
         for category in current_data.keys():
             category_symptoms = []
 
-            # Собираем симптомы для текущей категории
+            # Collect symptoms for current category
             for symptom in symptoms:
                 if symptom.categoryName == category:
                     category_symptoms.append((
@@ -58,18 +58,18 @@ def update_symptom_order(symptoms: List[SymptomOrder]) -> bool:
                     ))
                     symptoms_processed.add(symptom.symptomName)
 
-            # Сортируем по порядку
+            # Sort by order
             category_symptoms.sort(key=lambda x: x[2])
 
-            # Добавляем в обновленные данные
+            # Add to updated data
             for name, value, _ in category_symptoms:
                 updated_data[category][name] = value
 
-        # Добавляем оставшиеся симптомы
+        # Add remaining symptoms
         for category, symptoms_dict in current_data.items():
             for symptom_name, value in symptoms_dict.items():
                 if symptom_name not in symptoms_processed:
-                    # Проверяем, был ли симптом перемещен
+                    # Check if symptom was moved
                     moved = False
                     for symptom in symptoms:
                         if symptom.symptomName == symptom_name:
@@ -79,7 +79,7 @@ def update_symptom_order(symptoms: List[SymptomOrder]) -> bool:
                     if not moved:
                         updated_data[category][symptom_name] = value
 
-        # Записываем обновленные данные
+        # Write updated data
         try:
             with open(json_file, 'w') as file:
                 json.dump(updated_data, file, indent=2)
@@ -93,27 +93,27 @@ def update_symptom_order(symptoms: List[SymptomOrder]) -> bool:
         logger.error(f"Error in update_symptom_order: {str(e)}")
         return False
 
-def get_symptoms_for_gene(file_name: str) -> Dict[str, Dict[str, str]]:
+def get_symptoms_for_gene(file_name: str) -> dict[str, dict[str, str]]:
     """
-    Читает JSON файл с симптомами
+    Reads JSON file with symptoms
     """
     try:
         with open(file_name, 'r') as file:
             return json.load(file)
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         logger.error(f"File not found: {file_name}")
         raise Exception(f"File not found: {file_name}")
     except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON format in file: {file_name}")
-        raise Exception(f"Invalid JSON format in file: {file_name}")
+        logger.error(f"Invalid JSON format in file: {file_name}: {e}")
+        raise Exception(f"Invalid JSON format in file: {file_name}: {e}")
     except Exception as e:
         logger.error(f"Error reading file: {str(e)}")
         raise Exception("Internal server error")
 
 
-def get_categories_with_nested_keys(file_name: str) -> Dict[str, List[str]]:
+def get_categories_with_nested_keys(file_name: str) -> dict[str, list[str]]:
     """
-    Возвращает словарь с категориями и их ключами
+    Returns a dictionary with categories and their keys
     """
     try:
         data = get_symptoms_for_gene(file_name)

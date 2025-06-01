@@ -1,7 +1,8 @@
 # ai_processor_client.py
 import os
-import requests
 from typing import Any
+
+import requests
 
 
 class AIProcessorClient:

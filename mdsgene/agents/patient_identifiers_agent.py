@@ -1,12 +1,19 @@
+import logging
 import sys
+import traceback
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Annotated, Dict, List, Optional
 
-from typing import Annotated
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
+
 from mdsgene.agents.base_agent import BaseAgent
+from mdsgene.logging_config import configure_logging
 from mdsgene.pdf_uri_utils import resolve_pdf_uri
+
+# Get a logger for this module
+configure_logging()
+logger = logging.getLogger(__name__)
 
 
 # Define the state for our LangGraph
@@ -37,47 +44,47 @@ class PatientIdentifiersAgent(BaseAgent[State]):
         cache = self.load_cache()
         loaded_from_cache = False
 
-        print("\nGetting patient identifiers (checking cache)...")
+        logger.info("Getting patient identifiers (checking cache)...")
         cached_data_str = cache.get(self.patient_cache_key)
 
         if cached_data_str is not None:
-            print("  Cache HIT for patient identifiers.")
+            logger.debug("Cache HIT for patient identifiers.")
             try:
                 patient_identifiers_parsed = cached_data_str
                 if isinstance(patient_identifiers_parsed, list):
                     patient_identifiers = patient_identifiers_parsed
-                    print(f"  Successfully loaded {len(patient_identifiers)} identifiers from cache.")
+                    logger.info(f"Successfully loaded {len(patient_identifiers)} identifiers from cache.")
                     loaded_from_cache = True
                 else:
-                    print("WARNING: Cached data for patient identifiers is not a list. Re-fetching.")
+                    logger.warning("Cached data for patient identifiers is not a list. Re-fetching.")
             except Exception:
-                print("ERROR: Failed to parse cached patient identifiers. Re-fetching.")
+                logger.error("Failed to parse cached patient identifiers. Re-fetching.")
 
         if not loaded_from_cache:
-            print("  Cache MISS or invalid cache data. Querying AI Processor Service for patient identifiers...")
+            logger.info("Cache MISS or invalid cache data. Querying AI Processor Service for patient identifiers...")
             try:
                 pdf_uri = resolve_pdf_uri(Path(pdf_filepath))
                 if pdf_uri:
                     fetched_identifiers = self.ai_processor_client.get_patient_identifiers(pdf_uri=pdf_uri)
                 else:
                     fetched_identifiers = self.ai_processor_client.get_patient_identifiers(pdf_filepath)
-                print(f"  Successfully fetched {len(fetched_identifiers)} identifiers via Gemini.")
+                logger.info(f"Successfully fetched {len(fetched_identifiers)} identifiers via Gemini.")
 
                 try:
                     cache[self.patient_cache_key] = fetched_identifiers
                     self.save_cache(cache)
-                    print("Stored fetched patient identifiers in cache.")
+                    logger.debug("Stored fetched patient identifiers in cache.")
                     patient_identifiers = fetched_identifiers
                 except TypeError as json_err:
-                    print(f"ERROR: Could not serialize fetched patient identifiers to JSON: {json_err}. Not caching.")
+                    logger.error(f"Could not serialize fetched patient identifiers to JSON: {json_err}. Not caching.")
                     patient_identifiers = fetched_identifiers
                 except Exception as cache_err:
-                    print(f"ERROR: Could not save patient identifiers to cache: {cache_err}")
+                    logger.error(f"Could not save patient identifiers to cache: {cache_err}")
                     patient_identifiers = fetched_identifiers
 
             except Exception as e:
                 error_msg = f"ERROR getting patient identifiers via Gemini: {e}"
-                print(error_msg)
+                logger.error(error_msg)
                 import traceback
                 traceback.print_exc()
                 return {
@@ -87,7 +94,7 @@ class PatientIdentifiersAgent(BaseAgent[State]):
                     ]
                 }
 
-        print(f"--> Proceeding with {len(patient_identifiers)} patient identifiers.")
+        logger.info(f"Proceeding with {len(patient_identifiers)} patient identifiers.")
 
         return {
             **state,
@@ -106,9 +113,11 @@ class PatientIdentifiersAgent(BaseAgent[State]):
 
     def print_results(self, final_state: State):
         """Print the results of running the agent."""
-        print("\n=== Results ===")
-        print(f"PDF: {Path(final_state['pdf_filepath']).name}")
-        print(f"Patient Identifiers: {final_state.get('patient_identifiers')}")
+        logger.info(
+            f"=== Results ===\n"
+            f"PDF: {Path(final_state['pdf_filepath']).name}\n"
+            f"Patient Identifiers: {final_state.get('patient_identifiers')}"
+        )
 
         # Call the base class method to print the conversation
         super().print_results(final_state)
@@ -124,10 +133,10 @@ def main():
 
     # Validate the PDF filepath
     if not Path(pdf_filepath).exists():
-        print(f"Error: PDF file not found at {pdf_filepath}")
+        logger.error(f"PDF file not found at {pdf_filepath}")
         sys.exit(1)
 
-    print(f"Processing PDF: {pdf_filepath}")
+    logger.info(f"Processing PDF: {pdf_filepath}")
 
     # Initialize the agent
     agent = PatientIdentifiersAgent()
@@ -150,9 +159,8 @@ def main():
         agent.print_results(final_state)
 
     except Exception as e:
-        print(f"ERROR: An unexpected error occurred: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"An unexpected error occurred: {e}")
+        logger.error(traceback.format_exc())
         sys.exit(1)
 
 

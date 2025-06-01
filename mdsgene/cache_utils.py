@@ -1,8 +1,13 @@
 # cache_utils.py
 import json
+import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+# Get a logger for this module
+logger = logging.getLogger(__name__)
 
 
 def delete_pmid_cache(pmid: str, cache_root: str | Path):
@@ -17,11 +22,12 @@ def delete_pmid_cache(pmid: str, cache_root: str | Path):
     try:
         if pmid_cache_path.exists():
             shutil.rmtree(pmid_cache_path)
-            print(f"[CacheManager] Cache folder deleted: {pmid_cache_path}")
+            logger.info(f"[CacheManager] Cache folder deleted: {pmid_cache_path}")
         else:
-            print(f"[CacheManager] Cache folder not found: {pmid_cache_path}")
+            logger.info(f"[CacheManager] Cache folder not found: {pmid_cache_path}")
     except Exception as e:
-        print(f"[CacheManager] Error deleting cache folder: {e}")
+        logger.error(f"[CacheManager] Error deleting cache folder: {e}")
+
 
 def remove_document_from_pmid_cache(pdf_filename: str, pmid_cache_path: str | Path):
     """
@@ -39,16 +45,16 @@ def remove_document_from_pmid_cache(pdf_filename: str, pmid_cache_path: str | Pa
 
             if pdf_filename in pmid_cache:
                 removed = pmid_cache.pop(pdf_filename)
-                print(f"[PMID Cache] Removed entry for {pdf_filename}: {removed}")
+                logger.info(f"[PMID Cache] Removed entry for {pdf_filename}: {removed}")
 
                 with open(pmid_cache_path, 'w', encoding='utf-8') as f:
                     json.dump(pmid_cache, f, indent=2, ensure_ascii=False)
             else:
-                print(f"[PMID Cache] No entry found for {pdf_filename}")
+                logger.info(f"[PMID Cache] No entry found for {pdf_filename}")
         except Exception as e:
-            print(f"[PMID Cache] Error updating pmid_cache.json: {e}")
+            logger.error(f"[PMID Cache] Error updating pmid_cache.json: {e}")
     else:
-        print(f"[PMID Cache] File not found: {pmid_cache_path}")
+        logger.info(f"[PMID Cache] File not found: {pmid_cache_path}")
 
 def delete_document_and_all_related_data(
     pdf_filename: str, 
@@ -78,14 +84,14 @@ def delete_document_and_all_related_data(
     # Delete document from vector store
     response = vector_store_client.delete_document_from_store(pdf_filename, storage_path)
     if "error" in response:
-        print(f"[Cleanup] Error deleting document from vector store: {response['error']}")
+        logger.error(f"[Cleanup] Error deleting document from vector store: {response['error']}")
     else:
-        print(f"[Cleanup] {response['message']}")
+        logger.info(f"[Cleanup] {response['message']}")
 
 
 def load_formatted_result(
-    pmid: str, expected_patient_ids: Optional[list[str]] = None
-) -> Optional[Dict[str, Any]]:
+    pmid: str, expected_patient_ids: list[str] | None = None
+) -> dict[str, Any] | None:
     """Load formatted patient results for a specific PMID if present.
 
     Args:
@@ -109,18 +115,19 @@ def load_formatted_result(
                     if expected_patient_ids:
                         missing = [pid for pid in expected_patient_ids if pid not in cached_result]
                         if missing:
-                            print(
-                                f"[Cache] Partial cache hit. Missing {len(missing)} of {len(expected_patient_ids)} patients."
+                            logger.info(
+                                f"[Cache] Partial cache hit. Missing {len(missing)} "
+                                f"of {len(expected_patient_ids)} patients."
                             )
                         else:
-                            print("[Cache] Full cache hit.")
+                            logger.info("[Cache] Full cache hit.")
                     return cached_result
                 else:
-                    print("[Cache] Cache found but not marked as completed or missing result.")
+                    logger.info("[Cache] Cache found but not marked as completed or missing result.")
         except Exception as e:
-            print(f"[Cache] ERROR reading formatted cache: {e}")
+            logger.error(f"[Cache] ERROR reading formatted cache: {e}")
     else:
-        print("[Cache] No cache file found.")
+        logger.info("[Cache] No cache file found.")
     return None
 
 
@@ -129,7 +136,7 @@ def save_formatted_result(
     prompt: str,
     raw_answer: str,
     strategy: str,
-    formatted_result: Dict[str, Any],
+    formatted_result: dict[str, Any],
 ) -> None:
     """Save raw and formatted patient results for a PMID.
 
@@ -137,7 +144,7 @@ def save_formatted_result(
     """
     path = Path("cache") / pmid / "formatted_answer_cache.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    data: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
     if path.exists():
         try:
             with open(path, "r", encoding="utf-8") as f:

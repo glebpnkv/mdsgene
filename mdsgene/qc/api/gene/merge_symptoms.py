@@ -1,24 +1,23 @@
-from typing import List
-
-from fastapi import HTTPException
-from pydantic import BaseModel
-import pandas as pd
 import json
 import os
 
-from qc.api.gene.list_genes import get_file_id_from_disease_gene
-from qc.logging_config import logger
-from qc.config import properties_directory
+import pandas as pd
+from pydantic import BaseModel
+
+from mdsgene.qc.api.gene.list_genes import get_file_id_from_disease_gene
+from mdsgene.qc.config import properties_directory
+from mdsgene.qc.logging_config import logger
+
 
 class MergeSymptomRequest(BaseModel):
     geneName: str
     mergedSymptomName: str
-    symptomsToMerge: List[str]
+    symptomsToMerge: list[str]
 
 
 def merge_symptoms(data: MergeSymptomRequest) -> bool:
     try:
-        # Получаем путь к файлу
+        # Get the file path
         file_id = get_file_id_from_disease_gene(data.geneName)
         if not file_id:
             logger.error(f"No file ID found for gene '{data.geneName}'")
@@ -27,11 +26,11 @@ def merge_symptoms(data: MergeSymptomRequest) -> bool:
         # Use properties_directory to determine the path
         json_file = os.path.join(properties_directory, f"symptom_categories_{file_id}.json")
 
-        # Читаем текущие данные
+        # Read current data
         with open(json_file, 'r') as file:
             categories_data = json.load(file)
 
-        # Преобразуем данные в DataFrame для удобства обработки
+        # Convert data to DataFrame for easier processing
         rows = []
         for category, symptoms in categories_data.items():
             for symptom, value in symptoms.items():
@@ -42,7 +41,7 @@ def merge_symptoms(data: MergeSymptomRequest) -> bool:
                 })
         df = pd.DataFrame(rows)
 
-        # Находим первую категорию, где встречается любой из объединяемых симптомов
+        # Find the first category where any of the symptoms to merge appears
         target_category = None
         for symptom in data.symptomsToMerge:
             mask = df['symptom'].isin([symptom])
@@ -53,20 +52,20 @@ def merge_symptoms(data: MergeSymptomRequest) -> bool:
         if not target_category:
             target_category = next(iter(categories_data.keys()))
 
-        # Создаем новую структуру данных
+        # Create new data structure
         new_categories = {category: {} for category in categories_data.keys()}
 
-        # Копируем все симптомы, кроме тех, что объединяются
+        # Copy all symptoms except those being merged
         for index, row in df.iterrows():
             if row['symptom'] not in data.symptomsToMerge:
                 new_categories[row['category']][row['symptom']] = row['value']
 
-        # Добавляем новый объединенный симптом
-        # Используем значение первого симптома как основу для нового
+        # Add new merged symptom
+        # Use the first symptom's value as the base for the new one
         base_value = df[df['symptom'].isin(data.symptomsToMerge)]['value'].iloc[0]
         new_categories[target_category][data.mergedSymptomName] = base_value
 
-        # Сохраняем обновленные данные
+        # Save updated data
         with open(json_file, 'w') as file:
             json.dump(new_categories, file, indent=2)
 

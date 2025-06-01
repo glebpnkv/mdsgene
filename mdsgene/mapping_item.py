@@ -15,7 +15,7 @@ class MappingItem:
     custom_processor: Callable[[str | None, 'MappingItem'], dict[str, str]] | None = None
 
     query_processor: str | None = None
-    active: bool = False  # По умолчанию не активно, если не указано иное
+    active: bool = False  # Not active by default, unless otherwise specified
 
 @dataclass
 class QuestionInfo:

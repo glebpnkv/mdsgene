@@ -141,7 +141,7 @@ class BaseAgent(Generic[T]):
                 role = message["role"]
                 content = message["content"]
             else:
-                # Unknown message format, print what we can
+                # Unknown message format, log what we can
                 logger.warning(f"Unknown message format: {message}")
                 continue
 
