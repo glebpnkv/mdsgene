@@ -1,27 +1,25 @@
 # paperqa_processor_logic.py
-import os
-import sys
-import json
-import re
-import time
-import traceback
 import asyncio
+import json
+import os
+import re
+import sys
+import traceback
 from pathlib import Path
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Tuple
 
-# Import paper-qa library
-try:
-    import paperqa
-    from paperqa import Settings
-    from paperqa.settings import AgentSettings
-except ImportError:
-    raise ImportError("paper-qa library not installed. Please install it with 'pip install paper-qa'")
+import paperqa
+from paperqa import Settings
+from paperqa.settings import AgentSettings
+
+from mdsgene.internal.defines import NO_INFORMATION_LIST
 
 # --- Configuration ---
 # It's best practice to load API keys from environment variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Default model, can be overridden in constructor
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
 
 class PaperQAProcessorLogic:
     """Handles interactions with the paper-qa library for PDF processing."""
@@ -126,7 +124,6 @@ class PaperQAProcessorLogic:
     def _run_async_in_thread(self, coro, timeout=180):
         """Run async coroutine in a separate thread to avoid event loop conflicts."""
         import concurrent.futures
-        import threading
 
         def run_in_new_loop():
             new_loop = asyncio.new_event_loop()
@@ -312,11 +309,11 @@ class PaperQAProcessorLogic:
                 raw_answer = str(answer.answer) if answer.answer is not None else "Error: No answer was generated."
 
             if not raw_answer:
-                print(f"  ERROR: Empty response for question: '{question_text[:100]}...'", file=sys.stderr)
+                print(f"ERROR: Empty response for question: '{question_text[:100]}...'", file=sys.stderr)
                 raw_answer = "Error: Empty response received."
 
-            if ("not found" in raw_answer.lower() or "not stated" in raw_answer.lower() or "not mentioned" in raw_answer.lower()):
-                print(f"  PaperQA indicated information not found for: '{question_text[:100]}...'")
+            if raw_answer.lower() in NO_INFORMATION_LIST:
+                print(f"PaperQA indicated information not found for: '{question_text[:100]}...'")
 
             # Create result tuple
             result = (raw_answer, prompt)
@@ -386,7 +383,10 @@ class PaperQAProcessorLogic:
             elif json_text.strip().startswith('{') and json_text.strip().endswith('}'):
                 json_object_text = json_text.strip()
             else:
-                print("ERROR: Could not find a valid JSON object structure in the response for details.", file=sys.stderr)
+                print(
+                    "ERROR: Could not find a valid JSON object structure in the response for details.",
+                    file=sys.stderr
+                )
                 print(f"Received text: {json_text}")
                 return details  # Return defaults
 
@@ -403,7 +403,8 @@ class PaperQAProcessorLogic:
 
             # Extract details, handling potential missing keys or null values
             details['title'] = str(parsed_json.get('title')).strip() if parsed_json.get('title') else None
-            details['first_author_lastname'] = str(parsed_json.get('first_author_lastname')).strip() if parsed_json.get('first_author_lastname') else None
+            details['first_author_lastname'] = str(parsed_json.get('first_author_lastname')).strip() \
+                if parsed_json.get('first_author_lastname') else None
             details['year'] = str(parsed_json.get('year')).strip() if parsed_json.get('year') else None
 
             # Basic validation

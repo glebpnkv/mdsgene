@@ -1,20 +1,23 @@
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-
 from typing import Annotated
+from typing import Dict, List, Optional
+
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
+
 from mdsgene.agents.base_agent import BaseAgent
-from mdsgene.pdf_uri_utils import resolve_pdf_uri
-from mdsgene.patient_identifier_filter import filter_patient_identifiers_in_text
 from mdsgene.internal.pdf_text_extractor_logic import PdfTextExtractorLogic
+from mdsgene.patient_identifier_filter import filter_patient_identifiers_in_text
+from mdsgene.pdf_uri_utils import resolve_pdf_uri
+
 
 # Define the state for our LangGraph
 class State(TypedDict):
     pdf_filepath: str
     patient_identifiers: List[Dict[str, Optional[str]]]
     messages: Annotated[list, add_messages]
+
 
 class PatientIdentifiersAgent(BaseAgent[State]):
     """Agent for extracting patient identifiers from PDFs."""
@@ -32,7 +35,6 @@ class PatientIdentifiersAgent(BaseAgent[State]):
     def extract_patient_identifiers(self, state: State) -> State:
         """Extract patient identifiers from PDF using Gemini with caching."""
         pdf_filepath = state["pdf_filepath"]
-        pdf_name = Path(pdf_filepath).name
 
         patient_identifiers = []
         cache = self.load_cache()

@@ -1,7 +1,8 @@
+import re
 import sys
 from pathlib import Path
+
 from pypdf import PdfReader
-import re
 
 
 class PdfTextExtractorLogic:

@@ -1,11 +1,13 @@
+import json
 import os
 import sys
-import json
-import requests
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
-from mdsgene.processor import Processor
+
+import requests
+
 from mdsgene.internal.pdf_text_extractor_logic import PdfTextExtractorLogic
+from mdsgene.processor import Processor
 
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434/api/generate")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")

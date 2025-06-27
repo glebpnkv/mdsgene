@@ -1,8 +1,8 @@
 # ai_processor_service.py
 import os
-from typing import Dict, Optional, Any, List, Tuple
+from typing import Dict, Optional, Any
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from mdsgene.internal.gemini_processor_logic import GeminiProcessorLogic

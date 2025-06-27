@@ -1,32 +1,36 @@
 # paperqa_text_processor.py
-import os
-import sys
-import re
-import time
 import json
+import os
+import re
+import sys
 import traceback
 from pathlib import Path
-from typing import Optional, Tuple, List, Any, Dict
-from mdsgene.cache_utils import save_formatted_result
+from typing import Optional, Tuple, Dict
 
-# Import paper-qa library
-try:
-    import paperqa
-    from paperqa import Settings
-    from paperqa.settings import AgentSettings
-except ImportError:
-    raise ImportError("paper-qa library not installed. Please install it with 'pip install paper-qa'")
+import paperqa
+from paperqa import Settings
+from paperqa.settings import AgentSettings
+
+from mdsgene.cache_utils import save_formatted_result
+from mdsgene.internal.defines import NO_INFORMATION_LIST
 
 # --- Configuration ---
 # It's best practice to load API keys from environment variables
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# Default model, can be overridden in constructor
+# Default model - this can be overridden in constructor
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
 
 class PaperQATextProcessor:
     """Handles general text interactions with the paper-qa library (e.g., formatting)."""
 
-    def __init__(self, model_name: str = DEFAULT_GEMINI_MODEL, *, pmid: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        model_name: str = DEFAULT_GEMINI_MODEL,
+        *,
+        pmid: Optional[str] = None,
+        api_key: Optional[str] = None
+    ):
         """
         Initializes the PaperQA client for text operations.
 
@@ -106,14 +110,11 @@ class PaperQATextProcessor:
             A tuple of (formatted_answer, context).
         """
         print("  Formatting answer using PaperQATextProcessor...")
-        if not raw_answer or raw_answer.strip().lower() in ["", "none", "n/a", "information not found", "not specified", "not reported", "unknown"]:
+        if raw_answer.lower() in NO_INFORMATION_LIST:
             print(f"  Raw answer indicates missing info ('{raw_answer}'). Returning -99.")
             return "-99", None
         if "error" in raw_answer.lower() or "failed" in raw_answer.lower():
             print(f"  Raw answer indicates error ('{raw_answer[:50]}...'). Returning -99.")
-            return "-99", None
-        if "don't know" in raw_answer.lower() or "couldn't find" in raw_answer.lower() or "not stated" in raw_answer.lower() or "not mentioned" in raw_answer.lower():
-            print(f"  Raw answer indicates info not found ('{raw_answer[:50]}...'). Returning -99.")
             return "-99", None
 
         # Create a cache key based on raw_answer and strategy
@@ -122,7 +123,7 @@ class PaperQATextProcessor:
         # Check if we have a cached result
         if cache_key in self._format_cache:
             cached_data = self._format_cache[cache_key]
-            print(f"  Using cached formatted answer for this raw_answer/strategy combination.")
+            print("  Using cached formatted answer for this raw_answer/strategy combination.")
             return cached_data.get("formatted_answer", "-99"), raw_answer
 
         formatting_prompt = f"""
@@ -183,7 +184,7 @@ Formatted Value:"""
                     formatted_answer = formatted_answer[len(preamble):].strip()
                     break
 
-            if not formatted_answer or formatted_answer.lower() in ["unknown", "not stated", "not reported", "n/a", "none", "not applicable", "not mentioned", "-", "null"]:
+            if not formatted_answer or formatted_answer.lower() in NO_INFORMATION_LIST:
                 print(f"  Formatted answer resulted in an 'unknown' value ('{formatted_answer}'). Returning -99.")
                 # Return the original raw_answer as context
                 return "-99", raw_answer
@@ -215,7 +216,7 @@ Formatted Value:"""
             # Save to cache for future use
             cache_key = f"{hash(raw_answer)}-{hash(strategy)}"
             self.save_to_cache(cache_key, formatted_answer, raw_answer, strategy)
-            print(f"  Cached formatted answer for future use.")
+            print("  Cached formatted answer for future use.")
 
             # Return the formatted answer and the original raw_answer as context
             return formatted_answer, raw_answer

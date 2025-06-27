@@ -2,7 +2,7 @@
 import os
 import requests
 from typing import Dict, Optional, Any, List, Tuple
-from pathlib import Path
+
 
 class AIProcessorClient:
     """Client for interacting with the AI Processor Service."""

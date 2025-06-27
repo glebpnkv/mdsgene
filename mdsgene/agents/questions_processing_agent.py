@@ -1,19 +1,20 @@
-import sys
-import json
 import hashlib
+import json
 import os
 import re
+import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union, Tuple
-
 from typing import Annotated
+from typing import Dict, List, Optional, Any, Tuple
+
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
+
 from mdsgene.agents.base_agent import BaseAgent, CACHE_DIR
-from mdsgene.mapping_item import MappingItem, QuestionInfo
-from mdsgene.document_processor import DocumentProcessor
 from mdsgene.cache_utils import load_formatted_result, save_formatted_result
+from mdsgene.mapping_item import MappingItem, QuestionInfo
 from mdsgene.pdf_uri_utils import resolve_pdf_uri
+
 
 # Define the state for our LangGraph
 class State(TypedDict):
@@ -23,6 +24,7 @@ class State(TypedDict):
     patient_questions: List[List[QuestionInfo]]
     patient_answers: List[Dict[str, str]]
     messages: Annotated[list, add_messages]
+
 
 class QuestionsProcessingAgent(BaseAgent[State]):
     """Agent for processing questions mapping data from PDFs."""
@@ -518,7 +520,6 @@ class QuestionsProcessingAgent(BaseAgent[State]):
             field_rules[item.field] = item.response_convertion_strategy
 
         patient_ids = list(raw_values.keys())
-        prompt_json = json.dumps(raw_values, ensure_ascii=False)
         fields_in_results = {fld for patient in raw_values.values() for fld in patient.keys()}
         rules_lines = [
             f"Поле: {fld}\nПравило: {field_rules[fld]}" for fld in fields_in_results if fld in field_rules
@@ -548,7 +549,7 @@ class QuestionsProcessingAgent(BaseAgent[State]):
                     print(f"WARNING: Invalid PATIENT_BATCH_SIZE value: {batch_size}. Using default value of 3.")
                     batch_size = 3
             except (ValueError, TypeError):
-                print(f"WARNING: Invalid PATIENT_BATCH_SIZE value. Using default value of 3.")
+                print("WARNING: Invalid PATIENT_BATCH_SIZE value. Using default value of 3.")
                 batch_size = 3
 
             print(f"Processing patients in batches of {batch_size}")

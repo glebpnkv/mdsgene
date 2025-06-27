@@ -1,32 +1,32 @@
-import os
 import json
-import random
+import os
 import shutil
-import zipfile
 import threading
-import pandas as pd
-from typing import Dict, Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File, Query
-from pathlib import Path
-from uuid import uuid4
-from fastapi.responses import FileResponse
+import zipfile
 from datetime import datetime
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from uuid import uuid4
 
-from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
-from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
-from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
-from mdsgene.agents.base_agent import CACHE_DIR
-from mdsgene.workflows.pdf_processing import process_pdf_file
+import pandas as pd
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi import Body
-from typing import Any
-from mdsgene.document_processor import DocumentProcessor
-from langchain_community.vectorstores import FAISS
+from fastapi.responses import FileResponse
 
+from mdsgene.agents.base_agent import CACHE_DIR
+from mdsgene.agents.patient_identifiers_agent import PatientIdentifiersAgent
+from mdsgene.agents.publication_details_agent import PublicationDetailsAgent
+from mdsgene.agents.questions_processing_agent import QuestionsProcessingAgent
 from mdsgene.cache_utils import delete_document_and_all_related_data
+from mdsgene.custom_processors import CustomProcessors
+from mdsgene.qc.api.gene.utils import EXPECTED_HEADERS
+from mdsgene.qc.config import properties_directory, excel_folder
 from mdsgene.vector_store_client import VectorStoreClient
+from mdsgene.workflows.pdf_processing import process_pdf_file
 
 # Path to the PMID cache file
 PMID_CACHE_PATH = os.path.join("cache", "pmid_cache.json")
+
 
 def get_pmid_for_filename(filename: str) -> Optional[str]:
     """
@@ -76,40 +76,6 @@ def get_file_vector_store_dir(task_id: str, filename: str) -> str:
     file_st_dir.mkdir(parents=True, exist_ok=True)
     return str(file_st_dir)
 
-def initialize_document_processor(storage_path: str = None, use_vector_store: bool = None):
-    """
-    Initialize DocumentProcessor with FAISS index check.
-    If index doesn't exist, create an empty one.
-
-    Args:
-        storage_path: Path to the vector store directory
-        use_vector_store: Override for USE_VECTOR_STORE environment variable
-
-    Returns:
-        Initialized DocumentProcessor
-    """
-    # Import here to avoid circular imports
-    from mdsgene.vector_store_client import VectorStoreClient
-
-    # Use the provided value or fall back to the environment variable
-    use_vs = USE_VECTOR_STORE if use_vector_store is None else use_vector_store
-
-    # If vector store is disabled, return a processor without it
-    if not use_vs or storage_path is None:
-        print("Vector store is disabled. Initializing DocumentProcessor without vector store.")
-        return DocumentProcessor(storage_path=None, use_vector_store=False)
-
-    # Otherwise, initialize with vector store
-    # Create a vector store client
-    vector_store_client = VectorStoreClient()
-
-    # Create the vector store if it doesn't exist
-    vector_store_client.create_vector_store(storage_path)
-
-    # Now we can safely load
-    # For backward compatibility, still return a DocumentProcessor
-    # but it will use the vector store service internally
-    return DocumentProcessor(storage_path=storage_path, use_vector_store=True)
 
 def ensure_patient_identifiers_cached(filename: str, file_path: str):
     """
@@ -123,14 +89,7 @@ def ensure_patient_identifiers_cached(filename: str, file_path: str):
     pmid = get_pmid_for_filename(filename)
     agent = PatientIdentifiersAgent(pmid)
     agent.setup()
-    # Run agent to write to cache
-    initial_state = {
-        "pdf_filepath": file_path,
-        "patient_identifiers": [],
-        "messages": [{"role": "user", "content": f"Extract patient identifiers from {filename}"}]
-    }
-    final_state = agent.run(initial_state)
-    # final_state.patient_identifiers will be cached via agent.save_cache()
+
 
 # In-memory storage for tracking PDF analysis progress
 # In a production environment, this should be replaced with a database
@@ -193,7 +152,7 @@ def process_text_as_pdf(text: str, original_path: str) -> Dict[str, Any]:
             "publication_details": None,
             "pmid": None,
             "messages": [
-                {"role": "user", "content": f"Extract publication details and PMID from text file"}
+                {"role": "user", "content": "Extract publication details and PMID from text file"}
             ]
         }
         pub_final_state = pub_agent.run(pub_state)
@@ -208,7 +167,7 @@ def process_text_as_pdf(text: str, original_path: str) -> Dict[str, Any]:
             "pdf_filepath": temp_file_path,
             "patient_identifiers": [],
             "messages": [
-                {"role": "user", "content": f"Extract patient identifiers from text file"}
+                {"role": "user", "content": "Extract patient identifiers from text file"}
             ]
         }
         patient_final_state = patient_agent.run(patient_state)
@@ -225,7 +184,7 @@ def process_text_as_pdf(text: str, original_path: str) -> Dict[str, Any]:
             "vector_store": None,
             "pmid": pmid,
             "messages": [
-                {"role": "user", "content": f"Process questions for patients in text file"}
+                {"role": "user", "content": "Process questions for patients in text file"}
             ]
         }
         questions_final_state = questions_agent.run(questions_state)
@@ -294,14 +253,6 @@ def process_zip_archive(task_id: str, zip_path: str):
             try:
                 if ext == ".pdf":
                     filename = os.path.basename(path)
-
-                    # Create per-file VectorStore, if enabled
-                    if USE_VECTOR_STORE:
-                        vs_dir = get_file_vector_store_dir(task_id, filename)
-                        processor = initialize_document_processor(storage_path=vs_dir, use_vector_store=True)
-                    else:
-                        # Initialize without VectorStore
-                        processor = initialize_document_processor(storage_path=None, use_vector_store=False)
 
                     # Cache patient identifiers
                     ensure_patient_identifiers_cached(filename, path)
@@ -768,7 +719,7 @@ async def process_patient_questions(filename: str = Query(..., description="File
                 "patient_identifiers_count": len(final_state.get("patient_identifiers", [])),
                 "patient_answers": final_state.get("patient_answers", [])
             }
-        except ValueError as e:
+        except ValueError:
             # This catches the specific error when patient identifiers are not found in cache
             raise HTTPException(
                 status_code=400,
@@ -1625,14 +1576,6 @@ async def delete_document_and_cache(pdf_filename: str, pmid: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-import numpy as np
-from typing import List, Dict, Any, Optional
-from pathlib import Path
-from fastapi import HTTPException
-from qc.api.gene.utils import EXPECTED_HEADERS
-from qc.config import properties_directory, excel_folder
-from mdsgene.custom_processors import CustomProcessors
-
 # Ensure these directories exist
 EXCEL_FOLDER = Path(excel_folder)
 PROPERTIES_DIRECTORY = Path(properties_directory)
@@ -1794,7 +1737,12 @@ async def process_to_excel(data: List[Dict[str, Any]] = Body(...)):
         if hasattr(CustomProcessors, 'disease_abbrev'):
             # Call the processor method to process the value
             processor_method = getattr(CustomProcessors, 'disease_abbrev')
-            update_symptom_json(patient['gene1'], processor_method(patient['disease_abbrev']), patient, PROPERTIES_DIRECTORY)
+            update_symptom_json(
+                patient['gene1'],
+                processor_method(patient['disease_abbrev']),
+                patient,
+                PROPERTIES_DIRECTORY
+            )
 
         row['PMID'] = patient.get('PMID', '-99')
         row['family_ID'] = patient.get('Family_ID', '-99')

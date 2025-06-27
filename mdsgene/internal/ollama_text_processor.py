@@ -1,9 +1,11 @@
+import json
 import os
 import sys
-import json
 from pathlib import Path
-from typing import Optional, Tuple, List, Any, Dict
+from typing import Optional, Tuple, Dict
+
 import requests
+
 from mdsgene.cache_utils import save_formatted_result
 
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434/api/generate")

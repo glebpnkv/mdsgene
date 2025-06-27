@@ -23,7 +23,6 @@ def filter_patient_identifiers_in_text(
 
         if isinstance(identifier, dict):
             patient = identifier.get("patient")
-            family = identifier.get("family")
 
             if match(patient):
                 filtered.append(identifier)

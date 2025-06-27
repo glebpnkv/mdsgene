@@ -1,14 +1,16 @@
 import sys
 import uuid
 from pathlib import Path
-from typing import Dict, Optional, Any
-
 from typing import Annotated
+from typing import Dict, Optional
+
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
-from mdsgene.pmid_extractor import PmidExtractor
+
 from mdsgene.agents.base_agent import BaseAgent
 from mdsgene.pdf_uri_utils import resolve_pdf_uri
+from mdsgene.pmid_extractor import PmidExtractor
+
 
 # Define the state for our LangGraph
 class State(TypedDict):
@@ -16,6 +18,7 @@ class State(TypedDict):
     publication_details: Optional[Dict[str, str]]
     pmid: Optional[str]
     messages: Annotated[list, add_messages]
+
 
 class PublicationDetailsAgent(BaseAgent[State]):
     """Agent for extracting publication details from PDFs."""

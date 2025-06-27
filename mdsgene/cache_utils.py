@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Union, Dict, Any, Optional
 
+
 def delete_pmid_cache(pmid: str, cache_root: Union[str, Path]):
     """
     Delete the entire cache folder associated with a specific PMID.

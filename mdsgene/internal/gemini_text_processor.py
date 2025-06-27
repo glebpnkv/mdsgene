@@ -1,17 +1,18 @@
-import os
-import sys
-import re
-import time
 import json
+import os
+import re
+import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Optional, Tuple, List, Any, Dict
-from mdsgene.cache_utils import save_formatted_result
 
 # Use google.generativeai for Gemini interaction
+from google import genai
 from google.api_core import exceptions as google_exceptions
 from google.genai.types import Part
-from google import genai
+
+from mdsgene.cache_utils import save_formatted_result
 
 # --- Configuration (Copied and adapted from GeminiProcessorLogic) ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -25,6 +26,7 @@ DEFAULT_SAFETY_SETTINGS = [
 DEFAULT_GENERATION_CONFIG = genai.types.GenerationConfig(
     temperature=0,  # Deterministic formatting
 )
+
 
 class GeminiTextProcessor:
     """Handles general text interactions with the Gemini API (e.g., formatting)."""

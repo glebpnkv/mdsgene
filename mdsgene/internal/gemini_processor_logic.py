@@ -1,17 +1,17 @@
 # gemini_processor_logic.py
-import os
-import sys
 import json
+import os
 import re
+import sys
 import time
 import traceback
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
 
 # Use google.generativeai for Gemini interaction
-from google.api_core import exceptions as google_exceptions # For specific error handling
-from google.genai.types import Part
 from google import genai
+from google.api_core import exceptions as google_exceptions  # For specific error handling
+from google.genai.types import Part
 
 # --- Configuration ---
 # It's best practice to load API keys from environment variables
@@ -27,10 +27,10 @@ DEFAULT_SAFETY_SETTINGS = [
 ]
 # Generation config (optional, adjust temperature etc. if needed)
 DEFAULT_GENERATION_CONFIG = genai.types.GenerationConfig(
+    temperature=0,  # Deterministic extraction/formatting
     # candidate_count=1, # Default is 1
     # stop_sequences=["..."],
     # max_output_tokens=8192, # Adjust if needed
-    temperature=0,  # Deterministic extraction/formatting
     # top_p=0.9,
     # top_k=40
 )
@@ -72,7 +72,10 @@ class GeminiProcessorLogic:
 
         try:
             # --- Use genai.Client instead of configure/GenerativeModel ---
-            self.client = genai.Client(api_key=resolved_api_key)
+            self.client = genai.Client(
+                vertexai=True,
+                api_key=resolved_api_key
+            )
             self.model_name = model_name
             # Store config to pass to generate_content later
             self.safety_settings = DEFAULT_SAFETY_SETTINGS
@@ -278,8 +281,6 @@ class GeminiProcessorLogic:
 
         # Return both the answer and the prompt as context
         return (raw_answer, prompt) if raw_answer is not None else None
-
-
 
     def extract_publication_details(self) -> Dict[str, Optional[str]]:
         """
