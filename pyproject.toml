@@ -21,11 +21,22 @@ dependencies = [
     "pandas>=2.2.3",
     "paper-qa>=5.11.1",
     "pypdf>=5.4.0",
-    "ruff>=0.11.8",
+    "python-docx>=1.1.2",
     "uvicorn>=0.34.0",
 ]
 
 [dependency-groups]
 dev = [
     "jupyterlab>=4.3.6",
+    "ruff>=0.11.11",
 ]
+
+[tool.ruff]
+# Allow lines to be as long as 120.
+line-length = 120
+
+[tool.ruff.lint]
+# Add the `line-too-long` rule to the enforced rule set. By default, Ruff omits rules that
+# overlap with the use of a formatter, like Black, but we can override this behavior by
+# explicitly adding the rule.
+extend-select = ["E501"]

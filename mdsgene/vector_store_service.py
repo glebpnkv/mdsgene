@@ -1,14 +1,14 @@
 # vector_store_service.py
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
-from pathlib import Path
-import sys
 import os
-from typing import List, Dict, Optional, Any
+import sys
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
+from pydantic import BaseModel
 
 app = FastAPI()
 

@@ -1,6 +1,12 @@
 # pmid_extractor.py
-import requests
+import logging
 import urllib.parse
+
+import requests
+
+# Get a logger for this module
+logger = logging.getLogger(__name__)
+
 
 class PmidExtractor:
     """
@@ -8,17 +14,17 @@ class PmidExtractor:
     """
 
     @staticmethod
-    def get_pmid(title: str, author: str = "", year: str = "") -> str:
+    def get_pmid(title: str, author: str = "", year: str = "") -> str | None:
         """
         Queries PubMed for a PMID using article title, author, and year.
 
         :param title: The full article title.
         :param author: First author's last name (optional).
         :param year: Publication year (optional).
-        :return: PMID as string or None if not found.
+        :return: PMID as a string or None if not found.
         """
         if not title:
-            print("Title is required to search PubMed.")
+            logger.error("Title is required to search PubMed.")
             return None
 
         # Construct search query
@@ -29,7 +35,7 @@ class PmidExtractor:
             query_parts.append(year)
 
         search_query = " ".join(query_parts)
-        print(f"Prepared PubMed search query: {search_query}")
+        logger.info(f"Prepared PubMed search query: {search_query}")
 
         # Encode and prepare API URL
         encoded_query = urllib.parse.quote(search_query)
@@ -47,11 +53,11 @@ class PmidExtractor:
             return pmids[0] if pmids else None
 
         except Exception as e:
-            print(f"Error querying PubMed: {e}")
+            logger.error(f"Error querying PubMed: {e}")
             return None
 
 
-# ✅ Example usage
+# Example usage
 if __name__ == "__main__":
     title = "Mutations in VPS13D lead to a new recessive ataxia with spasticity and mitochondrial defects"
     author = "Gauthier"

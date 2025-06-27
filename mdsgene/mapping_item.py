@@ -1,6 +1,7 @@
 # mapping_item.py
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Optional, Callable
+
 
 @dataclass
 class MappingItem:
@@ -11,9 +12,10 @@ class MappingItem:
     response_convertion_strategy: str
     # Custom processor function: takes (raw_answer: Optional[str], item: MappingItem) -> Dict[str, str]
     # Note: Made raw_answer Optional to handle cases where Gemini might fail.
-    custom_processor: Optional[Callable[[Optional[str], 'MappingItem'], dict[str, str]]] = None
-    query_processor: Optional[str] = None
-    active: bool = False  # По умолчанию не активно, если не указано иное
+    custom_processor: Callable[[str | None, 'MappingItem'], dict[str, str]] | None = None
+
+    query_processor: str | None = None
+    active: bool = False  # Not active by default, unless otherwise specified
 
 @dataclass
 class QuestionInfo:
