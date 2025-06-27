@@ -6,6 +6,9 @@ from typing import Annotated
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 from mdsgene.agents.base_agent import BaseAgent
+from mdsgene.pdf_uri_utils import resolve_pdf_uri
+from mdsgene.patient_identifier_filter import filter_patient_identifiers_in_text
+from mdsgene.internal.pdf_text_extractor_logic import PdfTextExtractorLogic
 
 # Define the state for our LangGraph
 class State(TypedDict):
@@ -54,8 +57,27 @@ class PatientIdentifiersAgent(BaseAgent[State]):
         if not loaded_from_cache:
             print("  Cache MISS or invalid cache data. Querying AI Processor Service for patient identifiers...")
             try:
-                fetched_identifiers = self.ai_processor_client.get_patient_identifiers(pdf_filepath)
+                pdf_uri = resolve_pdf_uri(Path(pdf_filepath))
+                if pdf_uri:
+                    fetched_identifiers = self.ai_processor_client.get_patient_identifiers(pdf_uri=pdf_uri)
+                else:
+                    fetched_identifiers = self.ai_processor_client.get_patient_identifiers(pdf_filepath)
                 print(f"  Successfully fetched {len(fetched_identifiers)} identifiers via Gemini.")
+
+                # Extract document text and filter identifiers
+                text_extractor = PdfTextExtractorLogic()
+                document_text = text_extractor.extract_text(pdf_filepath)
+                if document_text is not None:
+                    before_count = len(fetched_identifiers)
+                    fetched_identifiers = filter_patient_identifiers_in_text(
+                        fetched_identifiers,
+                        document_text,
+                    )
+                    print(
+                        f"  Filtered {len(fetched_identifiers)} of {before_count} identifiers based on PDF text."
+                    )
+                else:
+                    print("  WARNING: Could not extract text for identifier filtering.")
 
                 try:
                     cache[self.patient_cache_key] = fetched_identifiers

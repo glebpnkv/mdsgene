@@ -30,7 +30,7 @@ DEFAULT_GENERATION_CONFIG = genai.types.GenerationConfig(
     # candidate_count=1, # Default is 1
     # stop_sequences=["..."],
     # max_output_tokens=8192, # Adjust if needed
-    temperature=0.1, # Lower temperature for more deterministic extraction/formatting
+    temperature=0,  # Deterministic extraction/formatting
     # top_p=0.9,
     # top_k=40
 )
@@ -39,21 +39,36 @@ DEFAULT_GENERATION_CONFIG = genai.types.GenerationConfig(
 class GeminiProcessorLogic:
     """Handles interactions with the Gemini API for PDF processing."""
 
-    def __init__(self, pdf_filepath: Path, api_key: Optional[str] = None, model_name: str = DEFAULT_GEMINI_MODEL):
-        """
-        Initializes the Gemini client and loads the PDF document.
+    def __init__(
+        self,
+        pdf_filepath: Optional[Path] = None,
+        *,
+        pdf_uri: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model_name: str = DEFAULT_GEMINI_MODEL,
+    ):
+        """Initializes the Gemini client and prepares the PDF.
+
+        Either ``pdf_uri`` or ``pdf_filepath`` must be provided. When ``pdf_uri``
+        is supplied, the PDF file does not need to be present locally.
+        If only the path is given, the file will be uploaded once via the Gemini
+        Files API and the resulting URI cached for future use.
 
         Args:
-            pdf_filepath: Path to the input PDF file.
-            api_key: Google AI API key. If None, tries to read from GEMINI_API_KEY env var.
-            model_name: The specific Gemini model to use (e.g., 'gemini-1.5-flash').
+            pdf_filepath: Local path to the PDF file.
+            pdf_uri: Existing Gemini URI for the PDF.
+            api_key: Google AI API key. If ``None`` uses ``GEMINI_API_KEY``.
+            model_name: Specific Gemini model name (e.g. ``gemini-1.5-flash``).
         """
         resolved_api_key = api_key or GEMINI_API_KEY
         if not resolved_api_key:
-            raise ValueError("Gemini API key not provided and GEMINI_API_KEY environment variable not set.")
+            raise ValueError(
+                "Gemini API key not provided and GEMINI_API_KEY environment variable not set."
+            )
 
-        if not pdf_filepath.exists() or not pdf_filepath.is_file():
-             raise FileNotFoundError(f"PDF file not found: {pdf_filepath}")
+        if pdf_uri is None and pdf_filepath is not None:
+            if not pdf_filepath.exists() or not pdf_filepath.is_file():
+                raise FileNotFoundError(f"PDF file not found: {pdf_filepath}")
 
         try:
             # --- Use genai.Client instead of configure/GenerativeModel ---
@@ -69,27 +84,58 @@ class GeminiProcessorLogic:
             raise
 
         self.pdf_filepath = pdf_filepath
+        self.pdf_uri = pdf_uri
         self.pdf_parts: Optional[List[Part]] = None
-        self._load_pdf() # Load PDF during initialization
 
-    def _load_pdf(self):
-        """Reads the PDF file into Gemini Part format."""
+        if not self.pdf_uri and not self.pdf_filepath:
+            raise ValueError("Either pdf_uri or pdf_filepath must be provided")
+
+        if not self.pdf_uri and self.pdf_filepath:
+            from mdsgene.pdf_uri_cache_manager import PdfUriCacheManager
+
+            cache = PdfUriCacheManager()
+            cached = cache.get_uri(self.pdf_filepath.name)
+            if cached:
+                self.pdf_uri = cached
+            else:
+                uploaded = self._upload_pdf_to_gemini(self.pdf_filepath)
+                if uploaded:
+                    self.pdf_uri = uploaded
+                    cache.save_uri(self.pdf_filepath.name, uploaded)
+
+        self._load_pdf()
+
+    def _upload_pdf_to_gemini(self, path: Path) -> Optional[str]:
+        """Upload a PDF via the Gemini Files API and return the file URI."""
+        try:
+            uploaded = self.client.files.upload(file=str(path))
+            return getattr(uploaded, "uri", None)
+        except Exception as e:
+            print(f"Error uploading PDF to Gemini: {e}", file=sys.stderr)
+            return None
+
+    def _load_pdf(self) -> None:
+        """Prepare the PDF part for Gemini requests."""
+        if self.pdf_uri:
+            self.pdf_parts = [Part.from_uri(file_uri=self.pdf_uri, mime_type="application/pdf")]
+            return
+
+        if not self.pdf_filepath:
+            self.pdf_parts = None
+            return
+
         try:
             print(f"Loading PDF: {self.pdf_filepath}")
             pdf_bytes = self.pdf_filepath.read_bytes()
-            # Determine MIME type (usually application/pdf)
-            mime_type = "application/pdf" # Assuming standard PDF
+            mime_type = "application/pdf"
             self.pdf_parts = [Part.from_bytes(data=pdf_bytes, mime_type=mime_type)]
             print("PDF loaded successfully into Gemini Part.")
         except Exception as e:
             print(f"Error reading PDF file {self.pdf_filepath}: {e}", file=sys.stderr)
-            self.pdf_parts = None # Ensure it's None if loading fails
+            self.pdf_parts = None
 
     def _make_gemini_request(self, prompt_parts: List[Any], task_description: str) -> Optional[str]:
         """Makes a request to the Gemini API using the client with retry logic."""
-        if not self.pdf_parts and task_description != "formatting":
-             print("ERROR: PDF parts not loaded, cannot make request.", file=sys.stderr)
-             return None
 
         if task_description == "formatting":
             contents = [Part.from_text(text=p) if isinstance(p, str) else p for p in prompt_parts]
