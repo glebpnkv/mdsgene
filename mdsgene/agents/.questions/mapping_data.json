@@ -370,7 +370,7 @@
   },
   {
     "field": "aae",
-    "question": "What was the age at examination (AAE) for this patient?",
+    "question": "What was the age at examination (AAE) for this patient? Enter the age at examination as a numerical value in years. If a range is given, enter the midpoint.",
     "mapped_excel_column": "Guessed: aae",
     "response_convertion_strategy": "Enter the age at examination as a numerical value in years. If a range is given, enter the midpoint. If not reported, enter -99.",
     "custom_processor": "aae",
@@ -379,7 +379,7 @@
   },
   {
     "field": "aao",
-    "question": "What was the age at onset (AAO) of symptoms for this patient?",
+    "question": "What was the age at onset (AAO) of symptoms for this patient?  Enter the age at examination as a numerical value in years. If a range is given, enter the midpoint.",
     "mapped_excel_column": "Guessed: aao",
     "response_convertion_strategy": "Enter the age at onset as a numerical value in years. If a range is given, enter the midpoint. If not reported, enter -99.",
     "custom_processor": "aao",
